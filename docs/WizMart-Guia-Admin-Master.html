@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WizMart CRM · Guia do Administrador Master</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --accent-text:#415400; --accent-light:#F3F8DC;
+    --danger:#DC2626; --danger-light:#FEE2E2;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --text-3:#9CA3AF; --border:#E5E7EB;
+    --radius:14px; --shadow:0 1px 3px rgba(17,25,40,.06),0 8px 24px rgba(17,25,40,.05);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif;
+    color:var(--text); background:var(--bg); line-height:1.6; font-size:16px;
+  }
+  h1,h2,h3,h4{font-family:'Sora','Inter',sans-serif; line-height:1.25; color:var(--text); margin:0;}
+  .wrap{max-width:860px; margin:0 auto; padding:0 28px;}
+
+  /* ── Capa ── */
+  .cover{
+    background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%);
+    color:#fff; padding:96px 28px 84px; text-align:center; position:relative; overflow:hidden;
+  }
+  .cover::after{content:""; position:absolute; right:-80px; bottom:-80px; width:320px; height:320px;
+    background:radial-gradient(circle, rgba(141,182,0,.35), transparent 70%); border-radius:50%;}
+  .brand{display:inline-flex; align-items:center; gap:14px; margin-bottom:30px;}
+  .brand .logo{width:60px; height:60px; border-radius:16px; background:#fff;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .brand .name{font-family:'Sora'; font-weight:800; font-size:32px; letter-spacing:-.5px;}
+  .brand .name b{color:#D6F5C9;}
+  .cover h1{color:#fff; font-size:42px; font-weight:800; letter-spacing:-1px; margin:8px 0 14px; position:relative; z-index:1;}
+  .cover .sub{font-size:18px; color:#D6F5C9; font-weight:500; position:relative; z-index:1;}
+  .cover .pill{display:inline-block; margin-top:28px; background:rgba(255,255,255,.14);
+    border:1px solid rgba(255,255,255,.25); padding:8px 18px; border-radius:100px; font-size:14px; font-weight:600;
+    position:relative; z-index:1; backdrop-filter:blur(6px);}
+
+  /* ── Conteúdo ── */
+  section{padding:46px 0 8px;}
+  h2{font-size:27px; color:var(--primary); font-weight:800; margin-bottom:6px; padding-top:18px;}
+  h2 .num{display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; margin-right:12px;
+    background:var(--primary); color:#fff; border-radius:11px; font-size:18px; vertical-align:middle;}
+  h3{font-size:20px; margin:30px 0 10px; color:var(--text);}
+  h3::before{content:""; display:inline-block; width:8px; height:20px; background:var(--accent);
+    border-radius:3px; margin-right:10px; vertical-align:-3px;}
+  p{margin:10px 0; color:var(--text-2);}
+  strong{color:var(--text);}
+  a{color:var(--primary);}
+
+  .lead{font-size:18px; color:var(--text-2);}
+  .divider{height:1px; background:var(--border); margin:36px 0;}
+
+  /* Passos numerados */
+  ol.steps{list-style:none; counter-reset:s; padding:0; margin:18px 0;}
+  ol.steps>li{counter-increment:s; position:relative; padding:14px 0 14px 56px; border-bottom:1px dashed var(--border);}
+  ol.steps>li:last-child{border-bottom:none;}
+  ol.steps>li::before{content:counter(s); position:absolute; left:0; top:12px; width:36px; height:36px;
+    background:var(--primary-light); color:var(--primary); font-weight:700; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:15px; border:2px solid #fff;
+    box-shadow:0 0 0 1px var(--primary);}
+  ol.steps>li b{color:var(--text);}
+
+  ul.clean{margin:10px 0; padding-left:22px;}
+  ul.clean li{margin:6px 0; color:var(--text-2);}
+
+  /* Caixas (callouts) */
+  .box{border-radius:var(--radius); padding:18px 20px; margin:22px 0; border:1px solid; position:relative;}
+  .box .tag{font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.6px; display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .box p{margin:6px 0;}
+  .box.rule{background:var(--primary-light); border-color:#C7E8C7;}
+  .box.rule .tag{color:var(--primary);}
+  .box.tip{background:var(--accent-light); border-color:#E2EFB0;}
+  .box.tip .tag{color:var(--accent-text);}
+  .box.warn{background:var(--danger-light); border-color:#FBC9C9;}
+  .box.warn .tag{color:var(--danger);}
+
+  /* Moldura de print */
+  figure.shot{margin:22px 0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); background:var(--surface);}
+  figure.shot .bar{background:var(--primary); color:#fff; font-size:13px; font-weight:600; padding:8px 14px; display:flex; align-items:center; gap:8px;}
+  figure.shot .bar .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55);}
+  figure.shot .ph{min-height:200px; background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 14px,#f1f3f5 14px,#f1f3f5 28px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-3); text-align:center; padding:30px;}
+  figure.shot .ph .ico{font-size:30px; margin-bottom:8px; opacity:.6;}
+  figure.shot img{display:block; width:100%;}
+  figure.shot figcaption{padding:10px 14px; font-size:13.5px; color:var(--text-2); border-top:1px solid var(--border); background:#fcfdfd;}
+  figure.shot figcaption b{color:var(--primary);}
+
+  /* Tabelas */
+  table{width:100%; border-collapse:collapse; margin:18px 0; font-size:14.5px;}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border);}
+  thead th{background:var(--primary); color:#fff; font-weight:600; font-family:'Inter';}
+  thead th:first-child{border-top-left-radius:10px;}
+  thead th:last-child{border-top-right-radius:10px;}
+  tbody tr:nth-child(even){background:#fafbfc;}
+  td .perc{font-weight:700; color:var(--primary);}
+
+  .chip{display:inline-block; background:var(--primary-light); color:var(--primary); font-weight:600; font-size:12.5px; padding:2px 9px; border-radius:6px; border:1px solid #CDEACD;}
+  .menu-ref{display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--border); border-radius:8px; padding:2px 9px; font-weight:600; font-size:13.5px; color:var(--text);}
+
+  /* Sumário */
+  .toc{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px 28px; margin:40px 0; box-shadow:var(--shadow);}
+  .toc h2{padding-top:0; font-size:18px; margin-bottom:14px;}
+  .toc ol{margin:0; padding-left:20px; columns:2; column-gap:36px;}
+  .toc li{margin:7px 0; color:var(--text-2);}
+  .toc a{text-decoration:none; color:var(--text-2); font-weight:500;}
+  .toc a:hover{color:var(--primary);}
+
+  footer{background:#0E2E0E; color:#9DBF9D; text-align:center; padding:34px 28px; margin-top:60px; font-size:13.5px;}
+  footer b{color:#D6F5C9;}
+
+  @media print{
+    body{background:#fff; font-size:12pt;}
+    .cover{padding:60px 28px;}
+    section{page-break-inside:avoid;}
+    figure.shot,.box,table{page-break-inside:avoid;}
+    .toc{break-after:page;}
+  }
+  @media(max-width:640px){ .toc ol{columns:1;} .cover h1{font-size:32px;} }
+</style>
+</head>
+<body>
+
+<!-- ════════════ CAPA ════════════ -->
+<div class="cover">
+  <div class="brand">
+    <span class="logo">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1A6B1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/>
+        <path d="M2.5 3h2.2l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6.2"/>
+      </svg>
+    </span>
+    <span class="name">Wiz<b>Mart</b></span>
+  </div>
+  <h1>Guia do Administrador Master</h1>
+  <div class="sub">Manual de uso do CRM — passo a passo para o time comercial</div>
+  <div class="pill">Perfil: Administrador Master · Versão 1.0</div>
+</div>
+
+<div class="wrap">
+
+  <!-- ════════════ INTRO ════════════ -->
+  <section id="intro">
+    <p class="lead">Bem-vindo ao <strong>WizMart CRM</strong> — o sistema que organiza toda a operação comercial do time:
+    da prospecção do cliente até a inauguração do ponto de venda, passando por metas, comissões e premiações.</p>
+    <p>Este guia foi feito para o <strong>Administrador Master</strong> — o perfil com acesso total ao sistema.
+    Aqui você encontra, em linguagem direta, <strong>o que cada tela faz</strong> e <strong>como usar passo a passo</strong>.
+    Não é preciso conhecimento técnico: se você conhece a rotina comercial, vai se sentir em casa.</p>
+
+    <div class="box tip">
+      <div class="tag">💡 Como ler este guia</div>
+      <p>Cada seção tem um <strong>passo a passo numerado</strong>. As caixas verdes (<span class="chip">Regra de negócio</span>)
+      explicam como o sistema calcula as coisas — especialmente as <strong>comissões</strong>. As molduras de tela mostram
+      <strong>onde clicar</strong>.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ SUMÁRIO ════════════ -->
+  <div class="toc">
+    <h2>O que você vai aprender</h2>
+    <ol>
+      <li><a href="#acesso">Primeiro acesso (login)</a></li>
+      <li><a href="#navegacao">Conhecendo a tela</a></li>
+      <li><a href="#painel">Painel (Dashboard)</a></li>
+      <li><a href="#usuarios">Cadastrar e gerenciar usuários</a></li>
+      <li><a href="#funis">Funis e estágios</a></li>
+      <li><a href="#metas">Definir metas</a></li>
+      <li><a href="#pipeline">Acompanhar o Pipeline</a></li>
+      <li><a href="#fluxo">Cadência e Handoffs</a></li>
+      <li><a href="#projetos">Projetos de Layout</a></li>
+      <li><a href="#comissoes">Comissões (calculadora)</a></li>
+      <li><a href="#regras">Regras de comissão</a></li>
+      <li><a href="#gamificacao">Gamificação e Loja</a></li>
+      <li><a href="#tv">Painel de TV</a></li>
+      <li><a href="#glossario">Glossário</a></li>
+    </ol>
+  </div>
+
+  <!-- ════════════ 1 ACESSO ════════════ -->
+  <section id="acesso">
+    <h2><span class="num">1</span>Primeiro acesso (login)</h2>
+    <p>O sistema funciona no navegador (Chrome, Edge ou Safari). Você acessa pelo endereço que a equipe técnica enviou.</p>
+    <ol class="steps">
+      <li>Abra o navegador e digite o <b>endereço do sistema</b>.</li>
+      <li>Informe seu <b>e-mail</b> e <b>senha</b>.</li>
+      <li>Clique em <b>Entrar</b>. Pronto — você verá o Painel principal.</li>
+    </ol>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Tela de Login</div>
+      <img src="assets/01-login.png" alt="Tela de login" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/01-login.png</b><br><small>Destacar os campos de e-mail/senha e o botão "Entrar"</small></div>
+      <figcaption><b>Onde clicar:</b> preencha e-mail e senha e clique em <b>Entrar</b>.</figcaption>
+    </figure>
+    <div class="box warn">
+      <div class="tag">⚠️ Segurança</div>
+      <p>Sua senha é pessoal. Como Administrador Master, você tem acesso a <strong>todas as informações</strong> da operação —
+      não compartilhe seu acesso.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 2 NAVEGAÇÃO ════════════ -->
+  <section id="navegacao">
+    <h2><span class="num">2</span>Conhecendo a tela</h2>
+    <p>A tela tem duas áreas principais:</p>
+    <ul class="clean">
+      <li><strong>Menu lateral (esquerda):</strong> onde você navega entre as áreas — Painel, Pipeline, Comissões, Configurações, etc.</li>
+      <li><strong>Área central:</strong> mostra o conteúdo da área escolhida.</li>
+    </ul>
+    <p>Como Administrador Master, você enxerga <strong>todos os itens do menu</strong>. Os outros perfis (BDR, SDR, Representante, Designer)
+    veem apenas o que faz parte do trabalho deles.</p>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Visão geral — menu lateral</div>
+      <img src="assets/02-menu.png" alt="Visão geral - menu lateral" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/02-menu.png</b><br><small>Destacar o menu lateral e numerar as seções</small></div>
+      <figcaption><b>Dica:</b> o menu é organizado por blocos (Comercial, Gestão, Gamificação, Administração).</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 3 PAINEL ════════════ -->
+  <section id="painel">
+    <h2><span class="num">3</span>Painel (Dashboard)</h2>
+    <p>É a primeira tela após o login. Reúne os <strong>indicadores do time</strong> em tempo real, para você acompanhar o desempenho
+    sem precisar abrir cada negócio.</p>
+    <ul class="clean">
+      <li><strong>Prospects compartilhados</strong> — quantos leads entraram no funil.</li>
+      <li><strong>Atividades</strong> — meta planejada x realizada (ligações, e-mails, visitas).</li>
+      <li><strong>Reuniões e visitas</strong> — agendadas e realizadas, com mapa por estado.</li>
+      <li><strong>Conquistas e instalações</strong> — pontos de venda inaugurados.</li>
+    </ul>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Painel (Dashboard)</div>
+      <img src="assets/03-painel.png" alt="Painel (Dashboard)" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/03-painel.png</b><br><small>Destacar os cartões de indicadores</small></div>
+      <figcaption><b>Como usar:</b> use o Painel na reunião de resultados — é a fotografia do mês.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 4 USUÁRIOS ════════════ -->
+  <section id="usuarios">
+    <h2><span class="num">4</span>Cadastrar e gerenciar usuários</h2>
+    <p>É aqui que você adiciona pessoas ao sistema e define o que cada uma pode fazer. Acesse pelo menu
+    <span class="menu-ref">⚙️ Configurações</span> → aba <strong>Usuários</strong>.</p>
+
+    <h3>Adicionar um novo usuário</h3>
+    <ol class="steps">
+      <li>Vá em <b>Configurações → Usuários</b>.</li>
+      <li>Clique em <b>Convidar / Novo usuário</b>.</li>
+      <li>Preencha <b>nome</b> e <b>e-mail</b>.</li>
+      <li>Escolha o <b>Cargo / Papel</b>: Master, Gerente, BDR, SDR, Representante, Designer ou Visualizador.</li>
+      <li>Se o papel for <b>SDR</b>, escolha o <b>Nível de Comissão</b>: Junior, Pleno ou Senior (isso define o percentual dele).</li>
+      <li>Marque os <b>Produtos autorizados</b> (WizMart, Smart Café ou ambos).</li>
+      <li>Clique em <b>Salvar</b>.</li>
+    </ol>
+
+    <div class="box rule">
+      <div class="tag">📋 Regra de negócio · Nível do SDR</div>
+      <p>O <strong>nível do SDR é fixo no cadastro</strong> e determina o percentual de comissão dele em todas as vendas:
+      <strong>Junior 7,5% · Pleno 8,75% · Senior 10%</strong>. A calculadora de comissão usa esse nível automaticamente —
+      você não precisa escolher na hora do cálculo.</p>
+    </div>
+
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Configurações → Usuários → Novo usuário</div>
+      <img src="assets/04-usuario.png" alt="Formulário de usuário" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/04-usuario.png</b><br><small>Destacar os campos "Cargo / Papel" e "Nível de Comissão (SDR)"</small></div>
+      <figcaption><b>Onde clicar:</b> o campo <b>Nível de Comissão</b> só aparece quando o papel é <b>SDR</b>.</figcaption>
+    </figure>
+
+    <h3>Editar ou desativar alguém</h3>
+    <p>Na lista de usuários, clique no usuário para <strong>editar</strong> (mudar papel, nível, produtos) ou <strong>desativar</strong>
+    o acesso de quem saiu do time.</p>
+  </section>
+
+  <!-- ════════════ 5 FUNIS ════════════ -->
+  <section id="funis">
+    <h2><span class="num">5</span>Funis e estágios</h2>
+    <p>O sistema tem dois funis de vendas, cada um com suas etapas:</p>
+    <ul class="clean">
+      <li><strong>WizMart</strong> — da lista de potenciais até o ponto <em>Inaugurado</em>.</li>
+      <li><strong>Smart Café</strong> — com qualificação por porte do cliente, até a <em>Instalação realizada</em>.</li>
+    </ul>
+    <p>Em <span class="menu-ref">⚙️ Configurações</span> → aba <strong>Pipelines</strong> você visualiza e ajusta as etapas de cada funil.</p>
+    <div class="box tip">
+      <div class="tag">💡 Cross-sell</div>
+      <p>Um mesmo cliente pode receber produtos dos dois mundos. Qualquer pessoa do time pode adicionar um produto do outro
+      funil dentro do card do negócio.</p>
+    </div>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Configurações → Pipelines</div>
+      <img src="assets/05-funis.png" alt="Configuração de funis" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/05-funis.png</b></div>
+      <figcaption><b>Onde clicar:</b> aba <b>Pipelines</b> dentro de Configurações.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 6 METAS ════════════ -->
+  <section id="metas">
+    <h2><span class="num">6</span>Definir metas</h2>
+    <p>Acesse <span class="menu-ref">🎯 Metas</span> no menu para definir os objetivos do time (faturamento, atividades, visitas).
+    As metas alimentam o Painel e o Painel de TV, mostrando o quanto já foi atingido.</p>
+    <ol class="steps">
+      <li>Abra <b>Metas</b> no menu.</li>
+      <li>Defina o valor da meta por período e por pessoa/produto.</li>
+      <li>Clique em <b>Salvar</b>. O Painel passa a comparar meta x realizado.</li>
+    </ol>
+  </section>
+
+  <!-- ════════════ 7 PIPELINE ════════════ -->
+  <section id="pipeline">
+    <h2><span class="num">7</span>Acompanhar o Pipeline</h2>
+    <p>O <span class="menu-ref">🔀 Pipeline</span> mostra todos os negócios em formato de quadro (kanban): cada coluna é uma etapa,
+    cada cartão é um negócio. Arraste o cartão para mover de etapa.</p>
+    <ol class="steps">
+      <li>Abra o <b>Pipeline</b> no menu.</li>
+      <li>Clique em um <b>cartão</b> para ver os detalhes do negócio.</li>
+      <li>No detalhe, acompanhe contato, produto, atividades e o histórico (as "assinaturas" de quem trabalhou o negócio).</li>
+    </ol>
+    <div class="box rule">
+      <div class="tag">📋 Regra de negócio · As "assinaturas do card"</div>
+      <p>Cada negócio registra automaticamente <strong>quem o trabalhou</strong>: o <strong>BDR</strong> cria o card; ao passar para o
+      <strong>SDR</strong>, fica registrado; ao passar para o <strong>Representante</strong>, idem. São essas assinaturas que definem
+      <strong>entre quem a comissão será dividida</strong>.</p>
+    </div>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Pipeline — detalhe do negócio</div>
+      <img src="assets/06-pipeline.png" alt="Detalhe do negócio no pipeline" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/06-pipeline.png</b><br><small>Destacar BDR / SDR / Representante e o botão "Calcular comissão"</small></div>
+      <figcaption><b>Atalho:</b> num negócio já <b>ganho</b>, o botão <b>Calcular comissão</b> leva direto à calculadora com o negócio pronto.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 8 FLUXO ════════════ -->
+  <section id="fluxo">
+    <h2><span class="num">8</span>Cadência e Handoffs</h2>
+    <h3>Cadência diária (SDR)</h3>
+    <p>É a lista de tarefas do dia de cada SDR (ligar, mandar e-mail, WhatsApp). Como Master, você consegue acompanhar o
+    cumprimento da cadência do time.</p>
+    <h3>Handoffs (passagem para o Representante)</h3>
+    <p>Quando o SDR qualifica o cliente, ele faz o <strong>handoff</strong>: passa o negócio ao Representante, que aceita e dá
+    sequência. A tela <span class="menu-ref">↔️ Handoffs</span> mostra essas passagens.</p>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Handoffs</div>
+      <img src="assets/07-handoffs.png" alt="Tela de Handoffs" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/07-handoffs.png</b></div>
+      <figcaption><b>O que observar:</b> handoffs pendentes (aguardando o Representante) e aceitos.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 9 PROJETOS ════════════ -->
+  <section id="projetos">
+    <h2><span class="num">9</span>Projetos de Layout</h2>
+    <p>Quando um Minimercado é fechado, o time solicita o <strong>layout da loja</strong> ao Designer. Essas solicitações ficam em
+    <span class="menu-ref">✏️ Projetos de Layout</span>; o Designer trabalha na <span class="menu-ref">📐 Fila de Projetos</span>
+    em ordem de chegada.</p>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Projetos de Layout</div>
+      <img src="assets/08-projetos.png" alt="Lista de projetos de layout" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/08-projetos.png</b></div>
+      <figcaption><b>Status:</b> Pendente → Em andamento → Entregue.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 10 COMISSÕES ════════════ -->
+  <section id="comissoes">
+    <h2><span class="num">10</span>Comissões (calculadora)</h2>
+    <p>O coração da gestão comercial. Em <span class="menu-ref">🧮 Comissões</span> você registra o comissionamento de cada negócio.
+    A tela já puxa o produto e as assinaturas do card; você só informa o faturamento.</p>
+
+    <h3>Registrar uma comissão — passo a passo</h3>
+    <ol class="steps">
+      <li>Abra <b>Comissões</b> no menu (ou clique em <b>Calcular comissão</b> dentro de um negócio ganho).</li>
+      <li>Selecione o <b>Negócio</b>. O sistema mostra só os negócios <b>ativados</b> (inaugurados/instalados) e já preenche o produto e os responsáveis (BDR/SDR/Rep).</li>
+      <li>Informe a <b>data de ativação</b> e o <b>faturamento vendido</b> no período.</li>
+      <li>Se for avaliação antecipada (dia 10), mantenha <b>"Pagamento proporcional"</b> marcado e informe os <b>dias decorridos</b>.</li>
+      <li>Para <b>Máquina de Café</b>, marque <b>"Tabela de preços cheia"</b> se for o caso. Para <b>Comodato</b>, marque <b>"1ª fatura paga"</b>.</li>
+      <li>Confira o <b>resultado</b>: gatilho atingido, divisão por pessoa, data de pagamento e parcelas.</li>
+      <li>Clique em <b>Registrar comissão</b>.</li>
+    </ol>
+
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Comissões — calculadora</div>
+      <img src="assets/09-comissoes.png" alt="Calculadora de comissão" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/09-comissoes.png</b><br><small>Destacar: seleção do negócio, campo de faturamento e o quadro "Resultado"</small></div>
+      <figcaption><b>Fila de avaliação:</b> no topo aparecem os negócios do mês anterior que ainda faltam comissionar — clique para já carregar.</figcaption>
+    </figure>
+
+    <h3>Relatório de comissões</h3>
+    <p>Em <span class="menu-ref">📊 Relatório Comissões</span> você acompanha tudo por <strong>ciclo de pagamento (dia 15)</strong> e por
+    <strong>vendedor</strong>, muda o status (Projetada → Confirmada → Paga) e <strong>exporta em CSV</strong> para o financeiro.</p>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Relatório de Comissões</div>
+      <img src="assets/10-relatorio-comissoes.png" alt="Relatório de comissões" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/10-relatorio-comissoes.png</b><br><small>Destacar filtros, total por vendedor e botão "Exportar CSV"</small></div>
+      <figcaption><b>Onde clicar:</b> filtre por ciclo/vendedor e use <b>Exportar CSV</b> para enviar ao financeiro.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 11 REGRAS ════════════ -->
+  <section id="regras">
+    <h2><span class="num">11</span>Regras de comissão</h2>
+    <p>Estas são as regras que o sistema aplica automaticamente. Conhecê-las ajuda a conferir cada cálculo.</p>
+
+    <h3>Percentuais por papel</h3>
+    <table>
+      <thead><tr><th>Papel</th><th>Percentual sobre o faturamento</th></tr></thead>
+      <tbody>
+        <tr><td>BDR</td><td><span class="perc">2%</span></td></tr>
+        <tr><td>SDR Junior</td><td><span class="perc">7,5%</span></td></tr>
+        <tr><td>SDR Pleno</td><td><span class="perc">8,75%</span></td></tr>
+        <tr><td>SDR Senior</td><td><span class="perc">10%</span></td></tr>
+        <tr><td>Representante Comercial</td><td><span class="perc">17,5%</span></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Gatilhos para começar a comissionar (primeiros 30 dias)</h3>
+    <table>
+      <thead><tr><th>Produto</th><th>Gatilho</th><th>Observação</th></tr></thead>
+      <tbody>
+        <tr><td>WizMart Minimercado</td><td>vender a partir de <b>R$ 3.000</b></td><td>divisão padrão (BDR + SDR + Rep)</td></tr>
+        <tr><td>Venda Direta · Máquina de Snacks</td><td>vender a partir de <b>R$ 2.000</b></td><td>divisão padrão</td></tr>
+        <tr><td>Venda Direta · Máquina de Café</td><td>vender a partir de <b>R$ 1.000</b></td><td>exige <b>tabela de preços cheia</b> → regra dos 72%</td></tr>
+        <tr><td>Comodato</td><td><b>sem mínimo</b></td><td>exige <b>1ª fatura paga</b> para liberar</td></tr>
+      </tbody>
+    </table>
+
+    <div class="box rule">
+      <div class="tag">📋 Regra especial · Máquina de Café (72%)</div>
+      <p>Quando a Máquina de Café vende a partir de R$ 1.000 <strong>com a tabela de preços cheia</strong>, paga-se
+      <strong>72% de comissão</strong> dos 30 primeiros dias, divididos assim:
+      <strong>Representante 49% · SDR 21% · BDR 2%</strong>.</p>
+    </div>
+
+    <div class="box rule">
+      <div class="tag">📋 Regra · Avaliação antecipada (dia 10) e projeção</div>
+      <p>Para colocar dinheiro no bolso do time mais rápido: no <strong>dia 10</strong> avalia-se a venda dos primeiros dias.
+      O sistema <strong>projeta</strong> a venda de 30 dias assim: <em>(valor vendido ÷ dias decorridos) × 30</em>.
+      Se a projeção ficar <strong>acima do gatilho</strong>, paga-se a comissão <strong>proporcional ao já vendido</strong>.</p>
+      <p><strong>Exemplo:</strong> Minimercado inaugurado em 31/mai vendeu R$ 1.000 em 10 dias → projeção de R$ 3.000 (atinge o gatilho).
+      Paga-se a comissão sobre os R$ 1.000 já vendidos = <strong>R$ 270</strong> divididos entre BDR, SDR e Representante.</p>
+    </div>
+
+    <div class="box rule">
+      <div class="tag">📋 Regra · Comodato e parcelamento</div>
+      <p>No comodato não há faturamento mínimo, mas a comissão só é liberada quando o <strong>cliente paga a 1ª fatura</strong>.
+      O pagamento é <strong>parcelado com teto de R$ 5.000 por parcela</strong>.</p>
+      <p><strong>Exemplo:</strong> comissão de R$ 23.000 → <strong>4 parcelas de R$ 5.000 + 1 parcela de R$ 3.000</strong>.
+      As parcelas podem se acumular com as de outros contratos a receber.</p>
+    </div>
+
+    <div class="box rule">
+      <div class="tag">📋 Regra · Quando a comissão é paga</div>
+      <p>As comissões são pagas sempre no <strong>dia 15</strong> (data diferente do salário fixo).
+      Todo cliente <strong>inaugurado/instalado até o último dia do mês</strong> fica elegível para receber no
+      <strong>dia 15 do mês seguinte</strong>. A avaliação acontece no dia 10.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 12 GAMIFICAÇÃO ════════════ -->
+  <section id="gamificacao">
+    <h2><span class="num">12</span>Gamificação e Loja</h2>
+    <p>O sistema premia o engajamento do time com pontos e moedas:</p>
+    <ul class="clean">
+      <li><span class="menu-ref">🏆 Leaderboard</span> — ranking do time por pontos.</li>
+      <li><span class="menu-ref">🪙 Carteira</span> — saldo de moedas de cada pessoa.</li>
+      <li><span class="menu-ref">🛍️ Loja de Prêmios</span> — onde as moedas viram prêmios. Como Master, você cadastra os prêmios.</li>
+    </ul>
+  </section>
+
+  <!-- ════════════ 13 TV ════════════ -->
+  <section id="tv">
+    <h2><span class="num">13</span>Painel de TV</h2>
+    <p>O Painel de TV mostra os indicadores numa tela grande (recepção, sala do time). Você gera um <strong>link</strong> e escolhe
+    quais informações aparecem.</p>
+    <ol class="steps">
+      <li>Vá em <b>KPIs</b> → <b>Gerar Link de TV Display</b>.</li>
+      <li>Dê um <b>nome</b> ao display (ex.: "Recepção").</li>
+      <li>Marque as <b>métricas</b> que devem aparecer (metas, ganhos do dia, tarefas, rankings).</li>
+      <li>Clique em <b>Gerar</b> e abra o link na TV.</li>
+    </ol>
+    <div class="box warn">
+      <div class="tag">⚠️ Cuidado com dados financeiros</div>
+      <p>A opção <strong>"financeiro real"</strong> mostra valores em R$ na tela. Em TVs públicas, deixe-a <strong>desmarcada</strong>
+      e use apenas percentuais.</p>
+    </div>
+    <div class="box tip">
+      <div class="tag">💡 Revogar um link</div>
+      <p>Para desativar um display, clique em <strong>Revogar</strong> ao lado do link. A TV correspondente para de mostrar dados na hora.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 14 GLOSSÁRIO ════════════ -->
+  <section id="glossario">
+    <h2><span class="num">14</span>Glossário</h2>
+    <table>
+      <thead><tr><th>Termo</th><th>O que significa</th></tr></thead>
+      <tbody>
+        <tr><td><b>Card / Negócio</b></td><td>Um cliente em negociação dentro do funil.</td></tr>
+        <tr><td><b>Pipeline</b></td><td>O quadro com todos os negócios organizados por etapa.</td></tr>
+        <tr><td><b>Handoff</b></td><td>Passagem do negócio do SDR para o Representante.</td></tr>
+        <tr><td><b>Gatilho</b></td><td>Valor mínimo de venda que libera o pagamento da comissão.</td></tr>
+        <tr><td><b>Comodato</b></td><td>Modelo em que a máquina é cedida; comissão liberada após a 1ª fatura.</td></tr>
+        <tr><td><b>Assinaturas do card</b></td><td>Registro de quem trabalhou o negócio (BDR, SDR, Rep) — base da divisão da comissão.</td></tr>
+        <tr><td><b>Ciclo de pagamento</b></td><td>O mês de pagamento das comissões, sempre no dia 15.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<footer>
+  <b>WizMart CRM</b> · Guia do Administrador Master · Versão 1.0<br>
+  Documento de treinamento — uso interno do time comercial.
+</footer>
+
+</body>
+</html>

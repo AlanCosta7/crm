@@ -1,0 +1,305 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function getRole() {
+      return request.auth.token.role;
+    }
+    function isTenant(tid) {
+      return isAuth() && request.auth.token.tenantId == tid;
+    }
+
+    // Roles com acesso administrativo total
+    function isMaster(tid) {
+      return isTenant(tid) && getRole() == 'master';
+    }
+
+    // Roles que podem gerenciar cadência e configurações de time
+    function isManager(tid) {
+      return isTenant(tid) && (getRole() == 'master' || getRole() == 'manager');
+    }
+
+    // BDR: cria leads
+    function isBdr(tid) {
+      return isTenant(tid) && (getRole() == 'master' || getRole() == 'manager' || getRole() == 'bdr');
+    }
+
+    // SDR: executa cadência
+    function isSdr(tid) {
+      return isTenant(tid) && (getRole() == 'master' || getRole() == 'manager' || getRole() == 'sdr');
+    }
+
+    // Rep: recebe handoffs e fecha negócios
+    function isRep(tid) {
+      return isTenant(tid) && (getRole() == 'master' || getRole() == 'manager' || getRole() == 'rep');
+    }
+
+    // Design: apenas fila de projetos (sem gamificação)
+    function isDesign(tid) {
+      return isTenant(tid) && getRole() == 'design';
+    }
+
+    // Qualquer autenticado do tenant (inclusive viewer e design)
+    function isAnyRole(tid) {
+      return isTenant(tid);
+    }
+
+    // Roles operacionais (excluindo viewer e design)
+    function isOperational(tid) {
+      return isTenant(tid) && getRole() != 'viewer' && getRole() != 'design';
+    }
+
+    // Roles que podem ver deals (todos os membros autenticados do tenant, incluindo viewer e design)
+    function canReadDeals(tid) {
+      return isTenant(tid);
+    }
+
+    function tokenProducts() {
+      return request.auth.token.productIds is list && request.auth.token.productIds.size() > 0
+        ? request.auth.token.productIds
+        : ['wizmart'];
+    }
+
+    function canAccessProduct(productId) {
+      return productId == null || productId == 'all' || tokenProducts().hasAny([productId]);
+    }
+
+    function canAccessDocProduct(data) {
+      return canAccessProduct(data.get('productId', 'wizmart'));
+    }
+
+    function canAccessDocProducts(data) {
+      return data.get('productIds', ['wizmart']).hasAny(tokenProducts());
+    }
+
+    function requestProductAllowed() {
+      return canAccessProduct(request.resource.data.get('productId', 'wizmart'));
+    }
+
+    function requestProductsAllowed() {
+      return request.resource.data.get('productIds', ['wizmart']).hasAny(tokenProducts());
+    }
+
+    // cohortKeys não podem ser escritos diretamente pelo cliente
+    function notWritingCohortKeys() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['cohortKeys']);
+    }
+
+    // ── Tenant Root ────────────────────────────────────────────────────────────
+    match /tenants/{tid} {
+
+      // Deals / Negócios
+      // design: somente leitura
+      match /deals/{dealId} {
+        allow read:   if canReadDeals(tid) && canAccessDocProduct(resource.data);
+        allow create: if isBdr(tid) && requestProductAllowed();
+        allow update: if isOperational(tid)
+                      && canAccessDocProduct(resource.data)
+                      && requestProductAllowed()
+                      && notWritingCohortKeys();
+        allow delete: if isMaster(tid);
+      }
+
+      // Funnels (configurados pelo admin, lidos por todos)
+      match /funnels/{funnelId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        allow write:  if isManager(tid) && requestProductAllowed();
+      }
+
+      // Contatos e Empresas
+      // design: leitura em companies (exibir nome da empresa no card de projeto)
+      match /contacts/{contactId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProducts(resource.data);
+        allow write:  if isOperational(tid) && requestProductsAllowed();
+      }
+      match /companies/{companyId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProducts(resource.data);
+        allow write:  if isOperational(tid) && requestProductsAllowed();
+      }
+
+      // Coleção legada de sellers (compatibilidade v1)
+      match /sellers/{sellerId} {
+        allow read:   if isAnyRole(tid);
+        allow write:  if isMaster(tid);
+      }
+
+      // Coleção legada de stages (compatibilidade v1)
+      match /stages/{stageId} {
+        allow read:   if isAnyRole(tid);
+        allow write:  if isManager(tid);
+      }
+
+      // Usuários
+      match /users/{userId} {
+        allow read:  if isAnyRole(tid) && (request.auth.uid == userId || canAccessDocProducts(resource.data));
+        allow update: if (isMaster(tid) && requestProductsAllowed()) || (isTenant(tid) && request.auth.uid == userId && requestProductsAllowed());
+        allow create: if isMaster(tid) && requestProductsAllowed();
+        allow delete: if isMaster(tid);
+      }
+
+      // Activities v2 — leitura por todos; escrita apenas via Cloud Functions
+      match /activities/{activityId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        // Registro manual pelo card (email/whatsapp/reunião): papel operacional
+        // cria/edita apenas a própria atividade. Cloud Functions seguem podendo
+        // escrever via Admin SDK (ignoram as rules).
+        allow create: if isOperational(tid)
+                         && request.resource.data.userId == request.auth.uid
+                         && requestProductAllowed();
+        allow update: if isOperational(tid)
+                         && resource.data.userId == request.auth.uid
+                         && request.resource.data.userId == request.auth.uid
+                         && requestProductAllowed();
+        allow delete: if isMaster(tid);
+      }
+
+      // Feed de atividade legado
+      match /activity/{activityId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        allow write:  if false;
+      }
+
+      // Handoffs — SDR cria, Rep lê e aceita via Callable
+      match /handoffs/{handoffId} {
+        allow read:   if isOperational(tid) && canAccessDocProduct(resource.data);
+        allow create: if isSdr(tid) && requestProductAllowed();
+        allow update: if false; // somente Cloud Functions / Callable
+        allow delete: if isMaster(tid);
+      }
+
+      // Fila de cadência — somente Cloud Functions escrevem
+      match /cadence_queues/{sdrId} {
+        allow read:   if isManager(tid) || (isTenant(tid) && request.auth.uid == sdrId);
+        allow write:  if false;
+
+        match /daily/{date} {
+          allow read:   if isManager(tid) || (isTenant(tid) && request.auth.uid == sdrId);
+          allow write:  if false;
+        }
+      }
+
+      // Templates de Playbook
+      match /templates/{templateId} {
+        allow read:   if isOperational(tid) && canAccessDocProduct(resource.data);
+        allow write:  if isManager(tid) && requestProductAllowed();
+      }
+
+      // Gamificação — Moedas (ledger imutável, somente Cloud Functions escrevem)
+      match /coin_ledger/{txId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        allow write:  if false;
+      }
+
+      // Prêmios e resgates
+      match /prizes/{prizeId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        allow write:  if isManager(tid) && requestProductAllowed();
+      }
+      match /coin_redemptions/{redemptionId} {
+        allow read:   if (isManager(tid) || (isTenant(tid) && request.auth.uid == resource.data.userId)) && canAccessDocProduct(resource.data);
+        allow create: if isOperational(tid) && requestProductAllowed();
+        allow update: if isManager(tid) && canAccessDocProduct(resource.data) && requestProductAllowed();
+        allow delete: if isMaster(tid);
+      }
+
+      // Comissões — gerente/master registram e editam; o próprio beneficiário lê seu registro
+      match /commissions/{commissionId} {
+        allow read:   if isManager(tid)
+                         || (isTenant(tid) && request.auth.uid in resource.data.beneficiaryIds);
+        allow create: if isManager(tid);
+        allow update: if isManager(tid);
+        allow delete: if isMaster(tid);
+      }
+
+      // Fila de avaliação de comissão (dia 10) — só Cloud Functions escrevem
+      match /commission_queues/{cicloKey} {
+        allow read:  if isManager(tid);
+        allow write: if false;
+      }
+
+      // KPI Snapshots
+      match /kpi_snapshots/{snapshotId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        allow write:  if false; // somente Cloud Functions
+      }
+
+      // KPIs legados
+      match /kpis/{period} {
+        allow read:   if isAnyRole(tid);
+        allow write:  if false;
+      }
+
+      // Gamificação v1
+      match /gamification/{userId} {
+        allow read:   if isAnyRole(tid);
+        allow write:  if false;
+      }
+      match /achievements/{achievementId} {
+        allow read:   if isAnyRole(tid);
+        allow write:  if false;
+      }
+
+      // Tokens de Calendar OAuth (somente o próprio usuário ou master)
+      match /calendar_tokens/{userId} {
+        allow read:   if isMaster(tid) || (isTenant(tid) && request.auth.uid == userId);
+        allow write:  if false; // somente Cloud Functions HTTP
+      }
+
+      // Eventos de pagamento
+      match /payment_events/{eventId} {
+        allow read:   if isManager(tid);
+        allow write:  if false; // somente webhook Cloud Function
+      }
+
+      // Configurações e Integrações (somente master)
+      match /settings/{docId} {
+        allow read:   if isMaster(tid);
+        allow write:  if isMaster(tid);
+      }
+
+      // Links de TV
+      match /tv_links/{linkId} {
+        allow read:          if isManager(tid) && canAccessDocProduct(resource.data);
+        allow create, update: if isManager(tid) && requestProductAllowed();
+        // Delete (revogar) não tem request.resource.data — valida pelo doc existente.
+        allow delete:        if isManager(tid) && canAccessDocProduct(resource.data);
+      }
+
+      // ── v3: Metas por usuário ──────────────────────────────────────────────
+      // Apenas master/manager escrevem; operacionais leem (SDR/Rep veem suas próprias metas)
+      match /user_goals/{userId} {
+        allow read:   if isOperational(tid) || (isTenant(tid) && request.auth.uid == userId);
+        allow write:  if isManager(tid);
+      }
+
+      // ── v3: Projetos de Layout ─────────────────────────────────────────────
+      // Operacional cria; design atualiza status (in_progress / delivered); master deleta
+      match /project_requests/{requestId} {
+        allow read:   if isAnyRole(tid);
+        allow create: if isOperational(tid)
+                      && request.resource.data.requestedBy == request.auth.uid;
+        allow update: if isManager(tid)
+                      || (isDesign(tid) && (
+                            resource.data.status == 'pending'
+                            || resource.data.get('assignedToDesignerId', '') == request.auth.uid
+                         ));
+        allow delete: if isMaster(tid);
+      }
+
+      // ── v3: Timeline do Deal ───────────────────────────────────────────────
+      // Leitura para quem pode ver deals; escrita exclusiva via Cloud Functions
+      match /deal_timeline/{dealId} {
+        allow read:   if canReadDeals(tid);
+
+        match /events/{eventId} {
+          allow read:   if canReadDeals(tid);
+          allow write:  if false; // somente Cloud Functions
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "rules": {
+    "tenants": {
+      "$tenantId": {
+        ".read": "auth != null && auth.token.tenantId === $tenantId",
+        ".write": false,
+        "live_kpis": {
+          ".read": "auth != null && auth.token.tenantId === $tenantId",
+          ".write": false
+        },
+        "leaderboard": {
+          ".read": "auth != null && auth.token.tenantId === $tenantId",
+          ".write": false
+        }
+      }
+    },
+    "public_tv": {
+      "$token": {
+        ".read": true,
+        ".write": false
+      }
+    }
+  }
+}

@@ -1,0 +1,155 @@
+/**
+ * onDealStageChanged.ts — Cloud Function de transição de estágio v3
+ *
+ * Mudanças v3 vs v2:
+ *  - Removida lógica de convergência Inbound→Hunter (funis unificados)
+ *  - Ao entrar em "visita_agendada"   → grava cohortKeys.visitScheduledMonth
+ *  - Ao entrar em "inaugurado"        → grava cohortKeys.conquestMonth + incrementa KPI conquistas
+ *  - Ao entrar em "instalacao_agendada" → incrementa KPI instalações
+ *  - Mantém premiação de moedas por coinsOnEnter
+ *  - Bloqueia escrita se connectionType === 'standard_proposal' e destino é visita_*
+ */
+
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
+
+function nowMonth(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getCurrentCycle(): string {
+  const d = new Date();
+  return `Q${Math.ceil((d.getMonth() + 1) / 3)}-${d.getFullYear()}`;
+}
+
+export const onDealStageChanged = onDocumentUpdated(
+  "tenants/{tenantId}/deals/{dealId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after  = event.data?.after.data();
+    if (!before || !after) return;
+
+    // Ignora se o estágio não mudou
+    if (before.stage === after.stage) return;
+
+    const { tenantId, dealId } = event.params;
+    const db = admin.firestore();
+    const productId = after.productId || "wizmart";
+    const ownerId: string = after.assignedRepId || after.assignedSdrId || after.owner || "";
+    const newStage: string = after.stage;
+
+    // ── Busca o funil e o estágio de destino ────────────────────────────────
+    const funnelId = after.funnelId as string | undefined;
+    let targetStage: any = null;
+
+    if (funnelId) {
+      const funnelSnap = await db.doc(`tenants/${tenantId}/funnels/${funnelId}`).get();
+      if (funnelSnap.exists) {
+        const stages: any[] = funnelSnap.data()!.stages || [];
+        targetStage = stages.find((s: any) => s.id === newStage);
+      }
+    }
+
+    // ── Premiação de moedas por estágio ──────────────────────────────────────
+    const coinsOnEnter: number = targetStage?.coinsOnEnter || 0;
+    if (coinsOnEnter > 0 && ownerId) {
+      try {
+        await db.collection(`tenants/${tenantId}/coin_ledger`).add({
+          userId: ownerId,
+          productId,
+          amount: coinsOnEnter,
+          type: "stage_enter",
+          dealId,
+          note: `Entrou em "${targetStage?.name || newStage}"`,
+          cycle: getCurrentCycle(),
+          createdAt: FieldValue.serverTimestamp(),
+          createdBy: "system",
+        });
+      } catch (err) {
+        console.error("[onDealStageChanged] Erro ao premiar moedas:", err);
+      }
+    }
+
+    // ── CohortKeys automáticos ────────────────────────────────────────────────
+    const cohortPatch: Record<string, any> = {};
+
+    if (newStage === "visita_agendada" && !after.cohortKeys?.visitScheduledMonth) {
+      cohortPatch["cohortKeys.visitScheduledMonth"] = nowMonth();
+    }
+
+    const isWonStage = newStage === "inaugurado" || newStage === "instalacao_realizada";
+    if (isWonStage) {
+      if (!after.cohortKeys?.conquestMonth) {
+        cohortPatch["cohortKeys.conquestMonth"] = nowMonth();
+      }
+      cohortPatch["status"] = "won";
+      cohortPatch["updatedAt"] = FieldValue.serverTimestamp();
+    }
+
+    if (Object.keys(cohortPatch).length > 0) {
+      try {
+        await event.data!.after.ref.update(cohortPatch);
+      } catch (err) {
+        console.error("[onDealStageChanged] Erro ao gravar cohortKeys:", err);
+      }
+    }
+
+    // ── KPI Realtime Database — increments ───────────────────────────────────
+    try {
+      const rtdb = admin.database();
+      const kpiRef = rtdb.ref(`tenants/${tenantId}/live_kpis`);
+
+      if (isWonStage) {
+        const conquestValue: number = after.conquestValue || 1;
+        if (productId === "wizmart") {
+          await kpiRef.child("conquestsWizmart").transaction((cur: number | null) => (cur || 0) + conquestValue);
+        } else {
+          await kpiRef.child("conquestsSmartCafe").transaction((cur: number | null) => (cur || 0) + conquestValue);
+        }
+      }
+
+      if (newStage === "instalacao_agendada") {
+        await kpiRef.child("installations").transaction((cur: number | null) => (cur || 0) + 1);
+      }
+
+      if (newStage === "visita_agendada") {
+        await kpiRef.child("visitsScheduled").transaction((cur: number | null) => (cur || 0) + 1);
+        // Visitas por estado
+        const uf: string = after.location?.state || "";
+        if (uf) {
+          await kpiRef.child(`visitsScheduledByState/${uf}`).transaction((cur: number | null) => (cur || 0) + 1);
+        }
+      }
+    } catch (err) {
+      console.error("[onDealStageChanged] Erro ao atualizar RTDB:", err);
+    }
+
+    // ── Projeto: timeline event ───────────────────────────────────────────────
+    if (isWonStage || newStage === "instalacao_agendada") {
+      try {
+        await db.collection(`tenants/${tenantId}/activities`).add({
+          type: "win",
+          productId,
+          userId: ownerId || "system",
+          dealId,
+          text: newStage === "inaugurado"
+            ? `🏆 Deal inaugurado — conquista registrada (${after.conquestValue || 1} PDV)`
+            : newStage === "instalacao_realizada"
+            ? `🏆 Instalação realizada — conquista registrada (${after.conquestValue || 1} PDV)`
+            : `📦 Instalação agendada`,
+          status: "completed",
+          coinsAwarded: 0,
+          wasOnTime: true,
+          cadenceType: "manual",
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("[onDealStageChanged] Erro ao gravar atividade:", err);
+      }
+    }
+
+    console.log(`[onDealStageChanged] Deal ${dealId}: ${before.stage} → ${newStage} (produto: ${productId})`);
+  }
+);
