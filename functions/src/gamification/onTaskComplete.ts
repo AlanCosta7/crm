@@ -1,13 +1,14 @@
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { ServerValue } from "firebase-admin/database";
 
 /**
  * Cloud Function que ouve a conclusão de tarefas no Firestore (+15, +20 ou +30 pts)
  * e atualiza pontuações, registra atividades no feed e atualiza o RTDB Leaderboard.
  */
 export const onTaskComplete = onDocumentUpdated(
-  "tenants/{tenantId}/deals/{dealId}",
+  { document: "tenants/{tenantId}/deals/{dealId}", region: "southamerica-east1" },
   async (event) => {
     const beforeData = event.data?.before.data();
     const afterData = event.data?.after.data();
@@ -114,9 +115,9 @@ export const onTaskComplete = onDocumentUpdated(
               productIds: userData.productIds || ["wizmart"],
             };
 
-            if (key === 'e') increments['emails'] = admin.database.ServerValue.increment(1);
-            if (key === 'w') increments['whats'] = admin.database.ServerValue.increment(1);
-            if (key === 'm') increments['meetings'] = admin.database.ServerValue.increment(1);
+            if (key === 'e') increments['emails'] = ServerValue.increment(1);
+            if (key === 'w') increments['whats'] = ServerValue.increment(1);
+            if (key === 'm') increments['meetings'] = ServerValue.increment(1);
 
             await lbUserRef.update(increments);
             await productLbUserRef.update(increments);

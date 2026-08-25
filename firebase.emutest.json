@@ -1,0 +1,26 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git", "firebase-debug.log", "firestore-debug.log", "ui-debug.log"]
+    }
+  ],
+  "database": {
+    "instance": "wizmart-crm-default-rtdb",
+    "rules": "database.rules.json"
+  },
+  "emulators": {
+    "auth": { "port": 9098 },
+    "firestore": { "port": 8081 },
+    "functions": { "port": 5002 },
+    "database": { "port": 9001 },
+    "hub": { "port": 4402 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
+  }
+}

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useLeaderboard } from './useLeaderboard';
 import { useAuthStore } from '../stores/authStore';
 import { ref, onValue, off } from 'firebase/database';
@@ -82,8 +82,8 @@ describe('useLeaderboard — hook de ranking em tempo real', () => {
       val: () => mockArrayData,
     };
 
-    // Aciona o callback do listener
-    callback(mockSnapshot);
+    // Aciona o callback do listener (act: flush do setState no React 19)
+    act(() => callback(mockSnapshot));
 
     expect(result.current.loading).toBe(false);
     expect(result.current.data).toHaveLength(3);
@@ -129,7 +129,7 @@ describe('useLeaderboard — hook de ranking em tempo real', () => {
       val: () => mockObjectData,
     };
 
-    callback(mockSnapshot);
+    act(() => callback(mockSnapshot));
 
     expect(result.current.loading).toBe(false);
     expect(result.current.data).toHaveLength(2);
@@ -156,7 +156,7 @@ describe('useLeaderboard — hook de ranking em tempo real', () => {
 
     const { result } = renderHook(() => useLeaderboard());
 
-    callback({ val: () => null });
+    act(() => callback({ val: () => null }));
 
     expect(result.current.data).toEqual([]);
     expect(result.current.loading).toBe(false);
@@ -181,7 +181,7 @@ describe('useLeaderboard — hook de ranking em tempo real', () => {
     const spyError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Dispara o erro no listener
-    errorHandler(mockError);
+    act(() => errorHandler(mockError));
 
     expect(result.current.error).toBe(mockError);
     expect(result.current.data).toEqual([]);

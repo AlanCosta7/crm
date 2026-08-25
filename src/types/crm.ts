@@ -121,7 +121,27 @@ export interface Deal {
   bdrId?: string;
   assignedSdrId?: string;
   assignedRepId?: string;
+  /**
+   * Espelho vivo de [owner, bdrId, assignedSdrId, assignedRepId] (sem duplicatas),
+   * mantido pela Cloud Function `onDealParticipantsChanged` — nunca escrito pelo
+   * cliente. Reflete só quem "assina" o card AGORA (não histórico: um Rep que
+   * recusou handoff ou um SDR substituído após lead perdido saem daqui).
+   * Base da regra "só vê quem participa" e do rateio de comissão.
+   */
+  participantIds?: string[];
+  /**
+   * Responsável atual (assignedRepId || assignedSdrId || bdrId || owner),
+   * calculado uma única vez no servidor pela mesma CF. Alimenta o filtro
+   * "Meus Cards" sem precisar recalcular em memória no client.
+   */
+  responsibleId?: string;
   due: string;
+  /** Lead de grande potencial marcado com estrela pelo time */
+  isFavorite?: boolean;
+  /** Gatilho Standby ativo — régua obrigatória de follow-ups em andamento */
+  standbyActive?: boolean;
+  standbyStartedAt?: any;
+  standbyFollowUps?: number;
   // tarefas legado v1 (e/w/m) — mantido para compatibilidade
   tasks: {
     e: boolean;
@@ -132,7 +152,7 @@ export interface Deal {
   handoffStatus?: 'pending' | 'accepted' | 'completed';
   handoffAt?: any;
   handoffNotes?: string;
-  priorityChannel?: 'email' | 'whatsapp' | 'call';
+  priorityChannel?: 'email' | 'whatsapp' | 'call' | 'linkedin';
   linkedDealId?: string;
   linkedHunterDealId?: string;
   // visita
@@ -147,6 +167,17 @@ export interface Deal {
   };
   // v3 — qualificação Smart Café
   clientSize?: 'small' | 'medium' | 'large';
+  /**
+   * Porte estimado da empresa (P/M/G) — Fase D3 do plano de assinaturas.
+   * Diferente de `clientSize`: é um CHUTE inicial do BDR na pesquisa (antes de
+   * qualquer contato), opcional, refinável pelo SDR depois. Não confundir com
+   * `clientSize`, que é a qualificação FORMAL do funil Smart Café, coletada
+   * pelo SDR/Rep já em contato com o cliente e usada no cálculo de proposta/SKU.
+   * Ausente = tratar como 'M' só para efeito de cálculo (sem reclassificar
+   * deals legados automaticamente). Usado pra guiar a distribuição balanceada
+   * de leads entre SDRs (não deixar um SDR só com contas G).
+   */
+  companySizeEstimate?: 'P' | 'M' | 'G';
   connectionType?: 'standard_proposal' | 'meeting_scheduled' | 'visit_scheduled';
   // v3 — cross-sell
   mainProduct?: ProductSKU;
@@ -162,9 +193,136 @@ export interface Deal {
     conquestMonth?: string;
     activitiesCount?: number;
   };
+  // captação de leads (WizMart Forms)
+  leadOrigin?: DealLeadOrigin;
   status?: DealStatus;
+  /** Motivo estruturado de perda — obrigatório ao marcar o negócio como perdido */
+  lostReason?: LostReasonId;
+  lostReasonNote?: string;
+  /** Devolvido ao BDR para nova tentativa futura de prospecção (motivos específicos) */
+  requeuedForBdr?: boolean;
+  requeuedAt?: any;
+  /** Momento em que o lead foi atribuído ao SDR — ancora a régua de cadência e o vencimento do card */
+  assignedAt?: any;
   createdAt?: any;
   updatedAt?: any;
+}
+
+// ─── Motivos de perda (Observações do cliente, jul/2026) ─────────────────────
+
+export type LostReasonId =
+  | 'valor_alto'
+  | 'quer_fornecedor'
+  | 'quer_franqueado'
+  | 'fechou_concorrente'
+  | 'fora_perfil_evento'
+  | 'fora_perfil_area'
+  | 'duplicado_outro_sdr'
+  | 'duplicado'
+  | 'sem_interesse_momento'
+  | 'repassado_wiz'
+  | 'repassado_smart'
+  | 'sem_contato';
+
+// ─── Captação de Leads (WizMart Forms) ───────────────────────────────────────
+
+/** Origem de um deal criado pelo endpoint público de captação. */
+export interface DealLeadOrigin {
+  leadId: string;
+  sourceId: string;
+  sourceName: string;
+  utm?: {
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    utmTerm?: string;
+    utmContent?: string;
+  };
+  pageUrl?: string;
+}
+
+/**
+ * Fonte de captação (site/landing page do cliente).
+ * Coleção: tenants/{tid}/lead_sources — gerenciada pelo master/manager na UI.
+ * A chave em claro NUNCA é armazenada; apenas o hash SHA-256.
+ */
+export interface LeadSource {
+  id: string;
+  name: string;
+  apiKeyHash: string;
+  /** Primeiros caracteres da chave (ex.: "wzk_ab12…") p/ identificação visual */
+  apiKeyPrefix: string;
+  /** Origens permitidas, ex.: ["https://wizmart.com.br", "https://*.wizmart.com.br"] */
+  allowedOrigins: string[];
+  funnelId: string;
+  productId: ProductId;
+  /** uid do responsável que recebe os deals desta fonte (opcional) */
+  defaultOwner?: string;
+  turnstileEnabled: boolean;
+  isActive: boolean;
+  stats?: {
+    received: number;
+    blocked: number;
+    lastLeadAt?: any;
+  };
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export type LeadStatus = 'new' | 'converted' | 'duplicate' | 'discarded';
+
+/**
+ * Registro bruto de lead recebido pelo endpoint público.
+ * Coleção: tenants/{tid}/leads — escrita SOMENTE via Admin SDK (Cloud Function).
+ */
+export interface Lead {
+  id: string;
+  sourceId: string;
+  status: LeadStatus;
+  /** deal criado (status converted) ou existente (status duplicate) */
+  dealId?: string;
+  data: {
+    name: string;
+    email?: string;
+    phone?: string;
+    company?: string;
+    message?: string;
+    custom?: Record<string, string>;
+  };
+  tracking?: {
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    utmTerm?: string;
+    utmContent?: string;
+    pageUrl?: string;
+    referrer?: string;
+  };
+  meta?: {
+    ip: string;
+    userAgent: string;
+    origin: string;
+  };
+  /** hash de dedupe (sourceId + email/telefone normalizado) */
+  dedupeKey?: string;
+  createdAt?: any;
+}
+
+/**
+ * Notificação in-app. Coleção: tenants/{tid}/notifications — criada SOMENTE
+ * por Cloud Functions; usuário lê as próprias e só pode marcar `read`.
+ */
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: 'lead_received' | string;
+  title: string;
+  body: string;
+  dealId?: string;
+  leadId?: string;
+  sourceId?: string;
+  read: boolean;
+  createdAt?: any;
 }
 
 // ─── Activity v2 ─────────────────────────────────────────────────────────────
@@ -194,6 +352,8 @@ export interface Activity {
   status: ActivityStatus;
   scheduledAt?: any;
   dueAt?: any;
+  /** Posição na sequência de contato configurada (settings/cadence.sdr.sequence). */
+  sequenceOrder?: number;
   completedAt?: any;
   templateId?: string;
   templateUsed?: boolean;
@@ -254,7 +414,7 @@ export interface Handoff {
   productId?: ProductId;
   fromSdrId: string;
   toRepId: string;
-  priorityChannel: 'email' | 'whatsapp' | 'call';
+  priorityChannel: 'email' | 'whatsapp' | 'call' | 'linkedin';
   visitType: 'presential' | 'video';
   visitScheduledAt?: any;
   notes: string;

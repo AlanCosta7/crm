@@ -19,10 +19,13 @@ interface HandoffModalProps {
   onCancel: () => void;
 }
 
+// Ordem reflete a prioridade de acompanhamento definida pelo cliente (jul/2026):
+// ligação e LinkedIn primeiro, depois WhatsApp e e-mail.
 const CHANNEL_OPTIONS = [
-  { value: 'whatsapp', label: 'WhatsApp',  icon: 'MessageCircle', color: '#25D366' },
-  { value: 'email',    label: 'E-mail',    icon: 'Mail',           color: '#1A6B1A' },
   { value: 'call',     label: 'Ligação',   icon: 'Phone',          color: '#F59E0B' },
+  { value: 'linkedin', label: 'LinkedIn',  icon: 'Linkedin',       color: '#0077B5' },
+  { value: 'whatsapp', label: 'WhatsApp',  icon: 'MessageCircle',  color: '#25D366' },
+  { value: 'email',    label: 'E-mail',    icon: 'Mail',           color: '#1A6B1A' },
 ] as const;
 
 const VISIT_OPTIONS = [
@@ -38,6 +41,7 @@ export function HandoffModal({ deal, reps, onConfirm, onCancel }: HandoffModalPr
   const [notes,      setNotes]     = useState('');
   const [saving,     setSaving]    = useState(false);
   const [errors,     setErrors]    = useState<Partial<Record<keyof HandoffFormData, string>>>({});
+  const [submitError, setSubmitError] = useState('');
 
   // Data mínima para o datepicker = amanhã
   const tomorrow = new Date();
@@ -59,8 +63,16 @@ export function HandoffModal({ deal, reps, onConfirm, onCancel }: HandoffModalPr
       return;
     }
     setSaving(true);
+    setSubmitError('');
     try {
       await onConfirm(form as HandoffFormData);
+    } catch (err: any) {
+      console.error('[HandoffModal] Erro ao confirmar handoff:', err);
+      setSubmitError(
+        err?.code === 'permission-denied'
+          ? 'Você não tem permissão para fazer a passagem de bastão. Apenas o SDR responsável (ou gestão) pode confirmar.'
+          : 'Não foi possível concluir a passagem de bastão. Verifique sua conexão e tente novamente.'
+      );
     } finally {
       setSaving(false);
     }
@@ -91,7 +103,7 @@ export function HandoffModal({ deal, reps, onConfirm, onCancel }: HandoffModalPr
             {/* Canal prioritário */}
             <div>
               <div className="fl" style={{ marginBottom: 8 }}>Canal prioritário de follow-up *</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                 {CHANNEL_OPTIONS.map(opt => (
                   <button
                     key={opt.value}
@@ -196,6 +208,13 @@ export function HandoffModal({ deal, reps, onConfirm, onCancel }: HandoffModalPr
               />
             </div>
           </div>
+
+          {submitError && (
+            <div role="alert" style={{ margin: '0 20px', padding: '10px 12px', borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="AlertTriangle" size={15} color="#B91C1C" />
+              {submitError}
+            </div>
+          )}
 
           <div className="modal-ft">
             <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={saving}>

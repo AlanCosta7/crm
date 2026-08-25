@@ -32,6 +32,7 @@ vi.mock('animejs', () => ({ default: animeStub }));
 // Mock Firestore — retorna dados vazios por padrão (sobrescrito por teste se necessário)
 vi.mock('../../hooks/useFirestore', () => ({
   useFirestoreCollection: () => ({ data: [], loading: false, error: null }),
+  useFirestoreMutations: () => ({ addDocument: vi.fn(), updateDocument: vi.fn(), deleteDocument: vi.fn() }),
 }));
 
 // Mock UIStore — produto padrão wizmart

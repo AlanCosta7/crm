@@ -22,15 +22,22 @@ import { useNavigate } from 'react-router-dom';
 import { Icon } from '../../components/ui/Icon';
 import { useAuthStore } from '../../stores/authStore';
 import { useCadencia } from './useCadencia';
+import { useCadenceConfig } from './useCadenceConfig';
 import { CompleteActivityModal } from './CompleteActivityModal';
 import {
   SDR_ACTIVITY_TYPES,
   ACTIVITY_TYPE_CONFIG,
+  PERIOD_LABEL,
+  dayOffsetLabel,
   calcNewCards,
   calcCompletionRate,
+  groupActivitiesByType,
+  classifyDueActivities,
   type ActivityType,
   type CadenceCard,
+  type SequenceStep,
 } from '../../utils/cadenceUtils';
+import { useFirestoreCollection } from '../../hooks/useFirestore';
 import { PRODUCT_COLOR } from '../../utils/crmFormat';
 import { useUIStore } from '../../stores/uiStore';
 import { matchesProductId } from '../../utils/productScope';
@@ -99,12 +106,29 @@ interface CadenceCardProps {
   card: CadenceCard;
   index?: number;
   onComplete: (type: ActivityType, activityId: string, card: CadenceCard) => void;
+  /** Abre a página inteira do lead (/lead/:dealId) */
+  onOpenLead?: (dealId: string) => void;
+  /** Sequência configurada pelo admin (vazia = ordem legada fixa) */
+  sequence: SequenceStep[];
 }
 
-function CadenceCardItem({ card, onComplete }: CadenceCardProps) {
-  const done = SDR_ACTIVITY_TYPES.filter(t => card.activities[t]?.status === 'completed').length;
+function CadenceCardItem({ card, onComplete, onOpenLead, sequence }: CadenceCardProps) {
+  // Cards novos têm o blitz de canais do dia 0; follow-ups/passos tardios têm 1 contato único.
+  const presentTypes = SDR_ACTIVITY_TYPES
+    .filter(t => card.activities[t])
+    .slice()
+    .sort((a, b) => (card.activities[a]?.sequenceOrder ?? SDR_ACTIVITY_TYPES.indexOf(a)) - (card.activities[b]?.sequenceOrder ?? SDR_ACTIVITY_TYPES.indexOf(b)));
+  const done = presentTypes.filter(t => card.activities[t]?.status === 'completed').length;
+  const total = presentTypes.length;
   const prodColor = card.productId ? PRODUCT_COLOR[card.productId as 'wizmart' | 'smart_cafe']?.primary : '#1A6B1A';
-  const pct = Math.round((done / 4) * 100);
+  const pct = total > 0 ? Math.round((done / total) * 100) : 100;
+
+  // Canais que essa sequência prevê pra este card, mas que ainda não chegaram
+  // (dayOffset > 0 e ainda não presentes) — só pra cards novos do dia 0, só
+  // orientação visual (o passo real é criado pelo motor no dia certo).
+  const upcomingSteps = card.isNew
+    ? sequence.filter(s => s.dayOffset > 0 && !card.activities[s.type])
+    : [];
 
   return (
     <div
@@ -114,32 +138,50 @@ function CadenceCardItem({ card, onComplete }: CadenceCardProps) {
       {/* Faixa lateral de produto */}
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: prodColor }} />
 
-      {/* Badge "Novo card" */}
+      {/* Badge "Novo card" / follow-up da régua semanal */}
       {card.isNew && (
         <span className="badge" style={{ position: 'absolute', top: 12, right: 14, fontSize: 10, background: '#EDE9FE', color: '#7C3AED', border: '1px solid #C4B5FD' }}>
           ✨ Novo hoje
         </span>
       )}
+      {card.followUp && (
+        <span className="badge" style={{ position: 'absolute', top: 12, right: 14, fontSize: 10, background: '#FEF3C7', color: '#92400E', border: '1px solid #F59E0B44' }}>
+          🔁 {card.weekLabel ?? 'Follow-up'}
+        </span>
+      )}
+      {card.sequenceStep && (
+        <span className="badge" style={{ position: 'absolute', top: 12, right: 14, fontSize: 10, background: '#EFF6FF', color: '#1E3A5F', border: '1px solid #3B82F644' }}>
+          🧭 {card.sequenceLabel ?? 'Sequência'}
+        </span>
+      )}
 
-      {/* Cabeçalho do card */}
-      <div style={{ paddingRight: 70 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{card.contactName}</div>
+      {/* Cabeçalho do card — clique abre a página inteira do lead */}
+      <div
+        style={{ paddingRight: 70, cursor: onOpenLead ? 'pointer' : 'default' }}
+        onClick={() => onOpenLead?.(card.dealId)}
+        title="Abrir a página do lead"
+        role={onOpenLead ? 'button' : undefined}
+      >
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {card.contactName}
+          {onOpenLead && <Icon name="ExternalLink" size={12} color="var(--text-2)" />}
+        </div>
         <div className="muted" style={{ fontSize: 12.5 }}>{card.companyName}</div>
       </div>
 
       {/* Progresso de atividades */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div className="prog" style={{ flex: 1 }}>
-          <div className="fill" style={{ width: pct + '%', transition: 'width 0.5s ease', background: done === 4 ? '#22C55E' : 'var(--primary)' }} />
+          <div className="fill" style={{ width: pct + '%', transition: 'width 0.5s ease', background: done === total ? '#22C55E' : 'var(--primary)' }} />
         </div>
-        <span style={{ fontSize: 12, fontWeight: 700, color: done === 4 ? '#22C55E' : 'var(--text-2)', minWidth: 32 }}>
-          {done}/4
+        <span style={{ fontSize: 12, fontWeight: 700, color: done === total ? '#22C55E' : 'var(--text-2)', minWidth: 32 }}>
+          {done}/{total}
         </span>
       </div>
 
-      {/* Botões de atividade */}
+      {/* Botões de atividade — apenas os canais deste card, na ordem da sequência */}
       <div className="cadence-buttons-grid">
-        {SDR_ACTIVITY_TYPES.map(type => {
+        {presentTypes.map(type => {
           const act = card.activities[type];
           return (
             <ActivityButton
@@ -152,6 +194,19 @@ function CadenceCardItem({ card, onComplete }: CadenceCardProps) {
           );
         })}
       </div>
+
+      {/* Orientação da sequência: canais previstos pra depois, ainda não liberados */}
+      {upcomingSteps.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+          <Icon name="CalendarClock" size={12} />
+          {upcomingSteps.map((s, i) => (
+            <span key={s.type}>
+              {ACTIVITY_TYPE_CONFIG[s.type].label} {dayOffsetLabel(s.dayOffset).toLowerCase()} ({PERIOD_LABEL[s.period].toLowerCase()})
+              {i < upcomingSteps.length - 1 ? ' · ' : ''}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -161,6 +216,7 @@ export function CadenciaPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const { queue, loading, refreshQueue } = useCadencia();
+  const { config: cadenceConfig } = useCadenceConfig();
 
   const [completing, setCompleting] = useState<{
     activityId: string;
@@ -169,6 +225,16 @@ export function CadenciaPage() {
     contactName: string;
     companyName: string;
   } | null>(null);
+
+  // Agrupamento (Observações do cliente, jul/2026): por card (cliente 1, cliente 2)
+  // ou por bloco de canal (todas as ligações juntas, todos os e-mails juntos...)
+  const [groupMode, setGroupMode] = useState<'card' | 'bloco'>('card');
+
+  // Alertas de agenda: atrasadas e prestes a atrasar (vencem hoje)
+  const { data: myActivities } = useFirestoreCollection<any>('activities');
+  const alerts = user?.uid
+    ? classifyDueActivities(myActivities, user.uid)
+    : { overdue: 0, dueToday: 0 };
 
   const todayLabel = new Date().toLocaleDateString('pt-BR', {
     weekday: 'long', day: '2-digit', month: 'long',
@@ -179,6 +245,27 @@ export function CadenciaPage() {
   const filteredCards = queue
     ? queue.cards.filter(card => matchesProductId(productScope, (card.productId || 'wizmart') as any))
     : [];
+
+  // Ordem dos canais configurada pelo admin (settings/cadence.sdr.sequence) —
+  // usada tanto pra ordenar os cards (modo "Por cliente") quanto os blocos
+  // (modo "Por bloco"). Sem configuração, cai na ordem legada fixa.
+  const channelOrder = cadenceConfig.sequence.length === SDR_ACTIVITY_TYPES.length
+    ? cadenceConfig.sequence.map(s => s.type)
+    : SDR_ACTIVITY_TYPES;
+
+  // Cards ordenados pela urgência: o card cuja próxima etapa PENDENTE vem mais
+  // cedo na sequência sobe pro topo — é isso que dá a "orientação clara da
+  // sequência" no nível da tela inteira, não só dentro de cada card.
+  const sortedCards = filteredCards.slice().sort((a, b) => {
+    const priority = (card: CadenceCard) => {
+      const pending = SDR_ACTIVITY_TYPES
+        .map(t => card.activities[t])
+        .filter((act): act is NonNullable<typeof act> => !!act && act.status !== 'completed');
+      if (pending.length === 0) return Infinity;
+      return Math.min(...pending.map(act => act.sequenceOrder ?? channelOrder.indexOf(act.type)));
+    };
+    return priority(a) - priority(b);
+  });
 
   let filteredRequired = 0;
   let filteredCompleted = 0;
@@ -256,11 +343,34 @@ export function CadenciaPage() {
         </div>
       </div>
 
+      {/* Alertas de agenda: atrasadas / prestes a atrasar */}
+      {(alerts.overdue > 0 || alerts.dueToday > 0) && (
+        <div role="alert" style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10,
+          background: alerts.overdue > 0 ? '#FEF2F2' : '#FFFBEB',
+          border: `1px solid ${alerts.overdue > 0 ? '#FECACA' : '#FDE68A'}`,
+        }}>
+          <Icon name="BellRing" size={17} color={alerts.overdue > 0 ? '#B91C1C' : '#B45309'} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: alerts.overdue > 0 ? '#B91C1C' : '#92400E' }}>
+            {alerts.overdue > 0 && `${alerts.overdue} atividade${alerts.overdue > 1 ? 's' : ''} atrasada${alerts.overdue > 1 ? 's' : ''}`}
+            {alerts.overdue > 0 && alerts.dueToday > 0 && ' · '}
+            {alerts.dueToday > 0 && `${alerts.dueToday} vence${alerts.dueToday > 1 ? 'm' : ''} hoje`}
+          </span>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => navigate('/activities')}>
+            Ver atividades
+          </button>
+        </div>
+      )}
+
       {/* KPI Cards de progresso */}
       <div className="grid-cols-4-responsive">
 
         {/* Taxa de conclusão com círculo */}
-        <div className="card card-pad" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        <div
+          className="card card-pad"
+          style={{ display: 'flex', gap: 14, alignItems: 'center' }}
+          title="Atividades de Hoje: as ações de contato (ligação, e-mail, WhatsApp) que você precisa executar nos cards de hoje."
+        >
           <div style={{ position: 'relative', flexShrink: 0 }}>
             <CircleProgress pct={completionPct} size={72} />
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -270,21 +380,25 @@ export function CadenciaPage() {
             </div>
           </div>
           <div>
-            <div className="label" style={{ fontSize: 11 }}>Conclusão do Dia</div>
+            <div className="label" style={{ fontSize: 11 }}>Atividades de Hoje</div>
             <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>
               {queue ? filteredCompleted : 0}/{queue ? filteredRequired : 0}
             </div>
-            <div className="muted" style={{ fontSize: 11 }}>atividades</div>
+            <div className="muted" style={{ fontSize: 11 }}>ações de contato concluídas</div>
           </div>
         </div>
 
         {/* Cards na fila */}
-        <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span className="label" style={{ fontSize: 11 }}>Cards Hoje</span>
+        <div
+          className="card card-pad"
+          style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+          title="Cards de Hoje: os leads distribuídos para você trabalhar hoje. Cada card gera suas próprias atividades de contato."
+        >
+          <span className="label" style={{ fontSize: 11 }}>Cards de Hoje</span>
           <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
             {filteredCards.length}
           </div>
-          <div className="muted" style={{ fontSize: 11 }}>leads atribuídos</div>
+          <div className="muted" style={{ fontSize: 11 }}>leads atribuídos a você</div>
         </div>
 
         {/* Previsão de amanhã */}
@@ -331,13 +445,19 @@ export function CadenciaPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-          {/* Barra de meta diária */}
+          {/* Barra de meta diária + seletor de agrupamento */}
           <div className="card" style={{ padding: '12px 20px' }}>
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>Meta diária</span>
-              <span style={{ fontSize: 12, color: 'var(--text-2)' }}>
-                {filteredCompleted} de {filteredRequired} atividades
-              </span>
+              <div className="row" style={{ gap: 10 }}>
+                <div className="seg">
+                  <button className={groupMode === 'card' ? 'on' : ''} onClick={() => setGroupMode('card')} title="Um card por cliente, com todas as atividades dele">Por cliente</button>
+                  <button className={groupMode === 'bloco' ? 'on' : ''} onClick={() => setGroupMode('bloco')} title="Todas as ligações juntas, todos os e-mails juntos...">Por bloco</button>
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--text-2)' }}>
+                  {filteredCompleted} de {filteredRequired} atividades
+                </span>
+              </div>
             </div>
             <div className="prog" style={{ height: 10 }}>
               <div className="fill" style={{
@@ -348,15 +468,69 @@ export function CadenciaPage() {
             </div>
           </div>
 
-          {/* Cards de deals */}
-          {filteredCards.map((card, i) => (
-            <CadenceCardItem
-              key={card.dealId}
-              card={card}
-              index={i}
-              onComplete={handleActivityClick}
-            />
-          ))}
+          {groupMode === 'card' ? (
+            /* Por cliente: ordenado pela etapa pendente mais urgente da sequência */
+            sortedCards.map((card, i) => (
+              <CadenceCardItem
+                key={card.dealId}
+                card={card}
+                index={i}
+                onComplete={handleActivityClick}
+                onOpenLead={dealId => navigate(`/lead/${dealId}`)}
+                sequence={cadenceConfig.sequence}
+              />
+            ))
+          ) : (
+            /* Por bloco de canal, na ordem configurada (ex.: Email → LinkedIn → WhatsApp → Ligação) */
+            groupActivitiesByType(filteredCards, channelOrder).map(group => {
+              const cfg = ACTIVITY_TYPE_CONFIG[group.type];
+              const pendingCount = group.items.filter(i => i.status !== 'completed').length;
+              return (
+                <div key={group.type} className="card" style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 8, background: cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name={cfg.icon} size={16} color={cfg.color} />
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 14 }}>{cfg.label}</h3>
+                    <span className="badge badge-gray" style={{ marginLeft: 'auto' }}>
+                      {pendingCount} pendente{pendingCount !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  {group.items.map(item => {
+                    const doneItem = item.status === 'completed';
+                    return (
+                      <div key={item.activityId ?? item.card.dealId + group.type} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)', gap: 10 }}>
+                        <div
+                          style={{ flex: 1, cursor: 'pointer', minWidth: 0 }}
+                          onClick={() => navigate(`/lead/${item.card.dealId}`)}
+                          title="Abrir a página do lead"
+                        >
+                          <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.card.contactName}
+                            {item.card.followUp && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> · {item.card.weekLabel}</span>}
+                          </div>
+                          <div className="muted" style={{ fontSize: 11.5 }}>{item.card.companyName}</div>
+                        </div>
+                        {doneItem ? (
+                          <span style={{ color: '#22C55E', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                            <Icon name="Check" size={14} /> feito
+                          </span>
+                        ) : (
+                          <button
+                            className="btn btn-outline btn-sm"
+                            style={{ flexShrink: 0 }}
+                            onClick={() => item.activityId && handleActivityClick(group.type, item.activityId, item.card)}
+                          >
+                            Concluir
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })
+          )}
         </div>
       )}
 

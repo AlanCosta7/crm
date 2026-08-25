@@ -107,9 +107,11 @@ describe('KPIsPage - Filtros, Papéis e Consolidação de Métricas', () => {
     expect(screen.getByText('Todos Produtos')).toBeInTheDocument();
 
     // Deve exibir os cards consolidados da Gestão
+    // (StatCard divide label e sub: "Faturamento" + "conquistado")
     expect(screen.getByText('Negócios Criados')).toBeInTheDocument();
-    expect(screen.getByText('Faturamento Conquistado')).toBeInTheDocument();
+    expect(screen.getByText('Faturamento')).toBeInTheDocument();
+    expect(screen.getByText('conquistado')).toBeInTheDocument();
     expect(screen.getByText('Ticket Médio')).toBeInTheDocument();
-    expect(screen.getByText('Mapa de Vendas por Região')).toBeInTheDocument();
+    expect(screen.getByText('Vendas por Região')).toBeInTheDocument();
   });
 });

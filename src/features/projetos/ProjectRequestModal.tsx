@@ -270,7 +270,7 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
               </div>
               <div>
                 <div className="label" style={{ marginBottom: 6 }}>Mídias de referência</div>
-                <div style={{ padding: '16px', borderRadius: 10, border: '2px dashed var(--border)', textAlign: 'center', cursor: 'pointer' }}>
+                <div style={{ padding: '16px', borderRadius: 10, border: '2px dashed var(--border)', textAlign: 'center', opacity: 0.65 }}>
                   <Icon name="Upload" size={22} color="var(--text-3)" style={{ margin: '0 auto 8px' }} />
                   <p className="muted" style={{ fontSize: 12, margin: 0 }}>Upload de fotos do local <span style={{ color: 'var(--text-3)' }}>(em breve)</span></p>
                 </div>

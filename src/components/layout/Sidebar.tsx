@@ -32,7 +32,10 @@ const NAV: NavSection[] = [
   },
   {
     section: 'Pipeline',
-    roles: ['master', 'manager', 'bdr', 'viewer'],
+    // sdr precisa estar aqui: tem a permissão view_pipeline (usePermissions.ts) e a
+    // rota /pipeline é liberada por permissão, não por role — sem 'sdr' aqui o item
+    // fica com a permissão mas sem o menu pra chegar nele.
+    roles: ['master', 'manager', 'bdr', 'sdr', 'viewer'],
     items: [
       { id: 'pipeline', label: 'Pipeline', icon: 'Workflow', path: '/pipeline' },
       { id: 'contacts', label: 'Contatos', icon: 'Users', path: '/contacts' },
@@ -103,6 +106,7 @@ const NAV: NavSection[] = [
     items: [
       { id: 'settings', label: 'Configurações', icon: 'Settings', path: '/settings' },
       { id: 'metas',    label: 'Metas',          icon: 'Target',  path: '/settings/metas' },
+      { id: 'cadencia-config', label: 'Cadência', icon: 'CalendarClock', path: '/settings/cadencia' },
     ],
   },
 ];
@@ -199,7 +203,7 @@ export function Sidebar() {
 
       {/* Navegação por role */}
       <nav className="sb-nav">
-        {NAV.map((sec) => {
+        {NAV.filter((sec) => !!user && sec.roles.includes(user.role)).map((sec) => {
           // Filtra itens já vistos em seções anteriores e por permissão
           const visibleItems = sec.items.filter((it) => {
             const perm = NAV_PERMISSIONS[it.id];

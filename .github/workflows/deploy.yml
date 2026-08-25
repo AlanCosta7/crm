@@ -32,19 +32,20 @@ jobs:
         env:
           # Configuração PÚBLICA do Firebase (cliente web) — já fica embutida no
           # bundle do site, não é segredo. A segurança vem das regras do Firestore/RTDB.
-          VITE_FIREBASE_API_KEY: AIzaSyDfKxRssbU-DjnDhf884tSQ0pdpSraRMD0
-          VITE_FIREBASE_AUTH_DOMAIN: codifyx7.firebaseapp.com
-          VITE_FIREBASE_PROJECT_ID: codifyx7
-          VITE_FIREBASE_STORAGE_BUCKET: codifyx7.firebasestorage.app
-          VITE_FIREBASE_MESSAGING_SENDER_ID: "526189058276"
-          VITE_FIREBASE_APP_ID: "1:526189058276:web:aa5f81497d48c2e37bf4f1"
-          VITE_FIREBASE_DATABASE_URL: https://codifyx7-default-rtdb.firebaseio.com
-          VITE_FIREBASE_MEASUREMENT_ID: G-BTFPE0J8CM
+          VITE_FIREBASE_API_KEY: AIzaSyBKmt6je9x2hP8pCtoILAX_W_QIVLnQ-JQ
+          VITE_FIREBASE_AUTH_DOMAIN: wizmart-crm.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: wizmart-crm
+          VITE_FIREBASE_STORAGE_BUCKET: wizmart-crm.firebasestorage.app
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "205342233020"
+          VITE_FIREBASE_APP_ID: "1:205342233020:web:ad7b69665f8af0e47e1bb9"
+          VITE_FIREBASE_DATABASE_URL: https://wizmart-crm-default-rtdb.firebaseio.com
+          VITE_FIREBASE_MEASUREMENT_ID: ""
+          VITE_FUNCTIONS_URL: https://southamerica-east1-wizmart-crm.cloudfunctions.net
 
       - name: Publicar no Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CODIFYX7 }}
-          projectId: codifyx7
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_WIZMART_CRM }}
+          projectId: wizmart-crm
           channelId: live # publica direto em produção

@@ -69,7 +69,7 @@ export function shouldRequireHandoff(
 // ── Validação do formulário de handoff ───────────────────────────────────────
 
 export interface HandoffFormData {
-  priorityChannel: 'email' | 'whatsapp' | 'call';
+  priorityChannel: 'email' | 'whatsapp' | 'call' | 'linkedin';
   visitType: 'presential' | 'video';
   visitScheduledAt: string; // ISO string
   toRepId: string;
@@ -166,10 +166,20 @@ export function visibleFunnelTypes(role: UserRole): FunnelType[] {
 
 /**
  * Verifica se um role pode mover deals no Kanban (drag-and-drop).
- * Viewers não podem; roles operacionais podem.
+ * Viewers e design não podem (as security rules de deals só permitem
+ * update para papéis operacionais); os demais podem.
  */
 export function canMoveDeal(role: UserRole): boolean {
-  return role !== 'viewer';
+  return role !== 'viewer' && role !== 'design';
+}
+
+/**
+ * Verifica se um role pode confirmar a passagem de bastão (handoff SDR → Rep).
+ * Espelha a security rule de `handoffs.create` (isSdr): apenas SDR e gestão.
+ * BDR passa leads para o SDR (não para o Rep) e por isso não faz handoff.
+ */
+export function canConfirmHandoff(role: UserRole): boolean {
+  return role === 'sdr' || role === 'manager' || role === 'master';
 }
 
 // ── Substituição de variáveis nos templates ───────────────────────────────────

@@ -7,7 +7,7 @@ import { FieldValue } from "firebase-admin/firestore";
  * Simula a orquestração do GCP Cloud Tasks atualizando incrementalmente o Firestore.
  */
 export const syncMoskit = onCall(
-  { maxInstances: 10 },
+  { maxInstances: 10, region: "southamerica-east1" },
   async (request) => {
     // 1. Valida autenticação e Tenant
     const { tenantId } = (request.auth?.token as any) || {};

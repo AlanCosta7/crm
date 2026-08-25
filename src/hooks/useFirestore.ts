@@ -16,9 +16,17 @@ import { db } from '../config/firebase';
 import { useAuthStore } from '../stores/authStore';
 
 // Hook para assinar uma Coleção Firestore isolada por Tenant em tempo real
+//
+// `cacheKey` (opcional): o efeito só reassina quando `queryConstraints.length`
+// muda — se o CALLER troca o VALOR de um constraint mantendo a mesma
+// quantidade (ex.: alternar o alvo de um `where('x','==', uid)` no toggle
+// "Meus Cards"/"Cards de Outro Ator"), o listener antigo continua vivo com o
+// valor velho. Passe uma string que mude junto com o valor do constraint
+// (ex.: `${modo}:${alvoUid}`) pra forçar a reassinatura nesses casos.
 export function useFirestoreCollection<T extends { id?: string }>(
   subCollectionName: string,
-  queryConstraints: QueryConstraint[] = []
+  queryConstraints: QueryConstraint[] = [],
+  cacheKey?: string
 ) {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -75,7 +83,7 @@ export function useFirestoreCollection<T extends { id?: string }>(
     return () => {
       unsubscribe();
     };
-  }, [user?.tenantId, subCollectionName, queryConstraints.length]);
+  }, [user?.tenantId, subCollectionName, queryConstraints.length, cacheKey]);
 
   return { data, loading, error };
 }

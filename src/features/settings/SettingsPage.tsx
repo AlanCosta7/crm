@@ -1,18 +1,23 @@
 /**
  * SettingsPage.tsx — Configurações administrativas do WizMart CRM
- * Abas: Usuários · Pipelines · Integrações · Plano
+ * Abas: Usuários · Pipelines · Integrações
  *
  * A aba Pipelines permite ao admin criar, renomear, reordenar estágios
  * e configurar as flags de convergência/handoff dinamicamente.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { httpsCallable } from 'firebase/functions';
+import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db, functions } from '../../config/firebase';
+import { useAuthStore } from '../../stores/authStore';
 import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
 import type { SettingUser, Stage, Funnel, FunnelStage, FunnelType, UserRole, ProductId, CommissionTier } from '../../types/crm';
 import { Icon } from '../../components/ui/Icon';
 import { Av } from '../../components/ui/Av';
 import { sortedStages } from '../../utils/funnelUtils';
 import { CalendarPane } from './CalendarPane';
+import { LeadSourcesPane } from './LeadSourcesPane';
 
 // ── PipelinesPane ─────────────────────────────────────────────────────────────
 function PipelinesPane() {
@@ -20,6 +25,7 @@ function PipelinesPane() {
   const { updateDocument: updateFunnel, addDocument: addFunnel } = useFirestoreMutations('funnels');
 
   const [selectedFunnelId, setSelectedFunnelId] = useState<string>('');
+
   const [_editingStage, _setEditingStage] = useState<FunnelStage | null>(null);
   const [showNewStage, setShowNewStage] = useState(false);
   const [showNewFunnel, setShowNewFunnel] = useState(false);
@@ -389,7 +395,7 @@ const getRoleBadgeClass = (roleId: string) => {
 };
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'empresa' | 'usuarios' | 'perfis' | 'pipelines' | 'calendar' | 'integracoes' | 'plano'>('usuarios');
+  const [tab, setTab] = useState<'empresa' | 'usuarios' | 'perfis' | 'pipelines' | 'calendar' | 'captacao' | 'integracoes'>('usuarios');
 
   // Firestore sync bindings
   const { data: users, loading: loadingUsers } = useFirestoreCollection<SettingUser>('users');
@@ -404,8 +410,46 @@ export function SettingsPage() {
   const { data: dbRoles } = useFirestoreCollection<any>('roles');
   const { setDocument: saveRole, deleteDocument: deleteRole } = useFirestoreMutations('roles');
   
+  const { user } = useAuthStore();
+  // Pane Empresa — dados persistidos em tenants/{tid}/settings/general
+  const [companyName, setCompanyName] = useState('');
+  const [companyCnpj, setCompanyCnpj] = useState('');
+  const [savingEmpresa, setSavingEmpresa] = useState(false);
+  const [empresaFeedback, setEmpresaFeedback] = useState<'saved' | 'error' | null>(null);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    const ref = doc(db, 'tenants', user.tenantId, 'settings', 'general');
+    return onSnapshot(ref, snap => {
+      const d = snap.data();
+      if (d) {
+        setCompanyName(d.companyName ?? '');
+        setCompanyCnpj(d.companyCnpj ?? '');
+      }
+    }, () => { /* sem permissão/offline: mantém vazio */ });
+  }, [user?.tenantId]);
+
+  const saveEmpresa = async () => {
+    if (!user?.tenantId) return;
+    setSavingEmpresa(true);
+    setEmpresaFeedback(null);
+    try {
+      await setDoc(doc(db, 'tenants', user.tenantId, 'settings', 'general'), {
+        companyName: companyName.trim(),
+        companyCnpj: companyCnpj.trim(),
+        updatedAt: serverTimestamp(),
+        updatedBy: user.uid,
+      }, { merge: true });
+      setEmpresaFeedback('saved');
+    } catch (err) {
+      console.error('[SettingsPage] Erro ao salvar dados da empresa:', err);
+      setEmpresaFeedback('error');
+    } finally {
+      setSavingEmpresa(false);
+    }
+  };
   const { addDocument, updateDocument } = useFirestoreMutations('settings');
-  const { addDocument: addUser, updateDocument: updateUser, deleteDocument: deleteUser } = useFirestoreMutations('users');
+  const { updateDocument: updateUser, deleteDocument: deleteUser } = useFirestoreMutations('users');
 
   // Perfis padrão do sistema
   const DEFAULT_ROLES = [
@@ -455,6 +499,8 @@ export function SettingsPage() {
 
   // Estados locais para usuários
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<UserRole>('rep');
@@ -559,35 +605,37 @@ export function SettingsPage() {
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteName.trim() || !inviteEmail.trim()) return;
+    if (!user?.tenantId) { setInviteError('Sessão inválida. Recarregue a página.'); return; }
 
-    const COLORS = ['#1A6B1A', '#8DB600', '#7C3AED', '#B45309', '#B91C1C', '#0E7490', '#4B5563'];
-    const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+    setInviteBusy(true);
+    setInviteError('');
+    try {
+      // Cria o acesso completo (Auth + claims + perfil) e envia a senha por e-mail.
+      const invite = httpsCallable(functions, 'inviteUser');
+      const res: any = await invite({
+        tenantId: user.tenantId,
+        name: inviteName.trim(),
+        email: inviteEmail.trim().toLowerCase(),
+        role: inviteRole,
+        productIds: inviteProducts,
+        commissionTier: inviteRole === 'sdr' ? inviteTier : undefined,
+      });
 
-    const getInitials = (name: string) => {
-      const parts = name.trim().split(/\s+/);
-      if (parts.length >= 2) {
-        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      if (res?.data?.emailSent === false) {
+        alert('Acesso criado, mas o e-mail com a senha temporária não pôde ser enviado. Verifique o endereço e reenvie.');
       }
-      return name.trim().substring(0, 2).toUpperCase();
-    };
 
-    await addUser({
-      name: inviteName.trim(),
-      email: inviteEmail.trim().toLowerCase(),
-      role: inviteRole,
-      productIds: inviteProducts,
-      commissionTier: inviteRole === 'sdr' ? inviteTier : undefined,
-      initials: getInitials(inviteName),
-      color: randomColor,
-      last: 'Convidado (Sem Acesso)',
-      isActive: true,
-    });
-
-    setInviteName('');
-    setInviteEmail('');
-    setInviteRole('rep');
-    setInviteProducts(['wizmart']);
-    setShowInviteModal(false);
+      setInviteName('');
+      setInviteEmail('');
+      setInviteRole('rep');
+      setInviteProducts(['wizmart']);
+      setShowInviteModal(false);
+    } catch (err: any) {
+      console.error('[inviteUser] erro:', err);
+      setInviteError(err?.message || 'Não foi possível criar o acesso. Tente novamente.');
+    } finally {
+      setInviteBusy(false);
+    }
   };
 
   const handleUserEditSubmit = async (e: React.FormEvent) => {
@@ -668,16 +716,16 @@ export function SettingsPage() {
     runLocalImportSimulation();
   };
 
-  // 1. Pane Empresa
+  // 1. Pane Empresa — persiste em tenants/{tid}/settings/general
   const renderEmpresa = () => (
     <div className="card card-pad" style={{ maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="field" style={{ margin: 0 }}>
         <div className="fl">Nome da Empresa</div>
-        <input className="input" defaultValue="WizMart Distribuição de Bebidas Ltda" aria-label="Nome da Empresa" />
+        <input className="input" value={companyName} onChange={e => setCompanyName(e.target.value)} aria-label="Nome da Empresa" />
       </div>
       <div className="field" style={{ margin: 0 }}>
         <div className="fl">CNPJ</div>
-        <input className="input" defaultValue="42.118.330/0001-09" aria-label="CNPJ" />
+        <input className="input" value={companyCnpj} onChange={e => setCompanyCnpj(e.target.value)} aria-label="CNPJ" />
       </div>
       <div className="field" style={{ margin: 0 }}>
         <div className="fl">Fuso Horário (Regra Brasília GMT-3)</div>
@@ -688,9 +736,21 @@ export function SettingsPage() {
           </span>
         </div>
       </div>
-      <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
-        Salvar Alterações
-      </button>
+      <div className="row" style={{ gap: 10 }}>
+        <button className="btn btn-primary" style={{ alignSelf: 'flex-start' }} onClick={saveEmpresa} disabled={savingEmpresa || !companyName.trim()}>
+          {savingEmpresa ? 'Salvando...' : 'Salvar Alterações'}
+        </button>
+        {empresaFeedback === 'saved' && (
+          <span style={{ color: 'var(--primary)', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Icon name="CheckCircle2" size={15} /> Salvo
+          </span>
+        )}
+        {empresaFeedback === 'error' && (
+          <span style={{ color: '#B91C1C', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Icon name="AlertTriangle" size={15} /> Erro ao salvar — tente novamente
+          </span>
+        )}
+      </div>
     </div>
   );
 
@@ -701,7 +761,7 @@ export function SettingsPage() {
         <h3 style={{ fontSize: 14.5 }}>Usuários Ativos</h3>
         <button className="btn btn-primary btn-sm" onClick={() => setShowInviteModal(true)}>
           <Icon name="UserPlus" size={15} />
-          Convidar Vendedor
+          Convidar Usuário
         </button>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -869,7 +929,6 @@ export function SettingsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {[
             { icon: 'Calendar', title: 'Google Agenda', desc: 'Sync de convites e reuniões em tempo real' },
-            { icon: 'MessageCircle', title: 'WhatsApp Business', desc: 'Rastreio de interações e contatos ativos' },
             { icon: 'Mail', title: 'SMTP Email Corporativo', desc: 'Disparo de emails e propostas direto do Kanban' }
           ].map((item, i) => (
             <div key={i} className="card card-pad" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -890,34 +949,6 @@ export function SettingsPage() {
   };
 
   // 5. Pane Plano
-  const renderPlano = () => (
-    <div className="card card-pad" style={{ maxWidth: 520 }}>
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-        <div>
-          <h2 className="h2">Plano WizMart Professional</h2>
-          <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>Faturamento anual recorrente (25 licenças de vendedor)</div>
-        </div>
-        <span className="badge badge-primary">Ativo</span>
-      </div>
-      <div className="money" style={{ fontSize: 26, color: 'var(--primary)', fontWeight: 800 }}>
-        R$ 2.388<span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}> / ano</span>
-      </div>
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 14, fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 7 }}>
-        <div className="row" style={{ gap: 8 }}>
-          <Icon name="Check" size={14} color="var(--primary)" />
-          <span>Usuários ILIMITADOS para TV Display pública</span>
-        </div>
-        <div className="row" style={{ gap: 8 }}>
-          <Icon name="Check" size={14} color="var(--primary)" />
-          <span>Fila de GCP Cloud Tasks para importação resiliente de grandes bases</span>
-        </div>
-      </div>
-      <button className="btn btn-outline btn-sm" style={{ marginTop: 18 }}>
-        Gerenciar Assinatura
-      </button>
-    </div>
-  );
-
   // 2.5. Pane Perfis
   const renderPerfis = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -994,8 +1025,8 @@ export function SettingsPage() {
     perfis:      renderPerfis,
     pipelines:   renderPipelines,
     calendar:    renderCalendar,
+    captacao:    () => <LeadSourcesPane />,
     integracoes: renderIntegracoes,
-    plano:       renderPlano,
   };
 
   return (
@@ -1019,8 +1050,8 @@ export function SettingsPage() {
           ['perfis',      '🏆 Perfis & Permissões'],
           ['pipelines',   'Pipelines'],
           ['calendar',    '📅 Google Calendar'],
+          ['captacao',    '📥 Captação de Leads'],
           ['integracoes', 'Integrações'],
-          ['plano',       'Assinatura & Plano'],
         ].map(([k, l]) => (
           <button
             key={k}
@@ -1035,12 +1066,12 @@ export function SettingsPage() {
       {/* Corpo da Aba Selecionada */}
       {subPanes[tab]()}
 
-      {/* Modal Convidar Vendedor */}
+      {/* Modal Convidar Usuário */}
       {showInviteModal && (
         <div className="modal-ov" style={{ zIndex: 300 }} onClick={() => setShowInviteModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-hd">
-              <h3 style={{ fontSize: 15 }}>Convidar Novo Vendedor</h3>
+              <h3 style={{ fontSize: 15 }}>Convidar Novo Usuário</h3>
               <button className="icon-btn" onClick={() => setShowInviteModal(false)}><Icon name="X" size={18} /></button>
             </div>
             <form onSubmit={handleInviteSubmit}>
@@ -1105,9 +1136,16 @@ export function SettingsPage() {
                   </div>
                 </div>
               </div>
+              {inviteError && (
+                <div style={{ margin: '0 16px', padding: '10px 12px', background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: 8, color: '#991B1B', fontSize: 12.5, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <Icon name="AlertTriangle" size={15} /> {inviteError}
+                </div>
+              )}
               <div className="modal-ft">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowInviteModal(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary"><Icon name="Check" size={16} />Enviar Convite</button>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowInviteModal(false)} disabled={inviteBusy}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" disabled={inviteBusy}>
+                  {inviteBusy ? <><Icon name="Loader" size={16} /> Criando acesso…</> : <><Icon name="Check" size={16} />Enviar Convite</>}
+                </button>
               </div>
             </form>
           </div>

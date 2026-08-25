@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Smart Café — Página de teste (WizMart Forms)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --danger:#DC2626; --danger-light:#FEE2E2;
+    --warn:#92400E; --warn-bg:#FEF3C7; --warn-border:#F59E0B;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --border:#E5E7EB;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif; color:var(--text); background:var(--bg); line-height:1.6;}
+  h1,h2,h3{font-family:'Sora','Inter',sans-serif; margin:0;}
+  code{font-family:'SFMono-Regular',Consolas,monospace; font-size:12.5px; background:#F1F3F5; padding:1px 6px; border-radius:5px;}
+
+  /* Banner de modo teste */
+  .test-banner{background:var(--warn-bg); border-bottom:2px solid var(--warn-border); color:var(--warn); padding:10px 20px; font-size:13.5px; font-weight:700; text-align:center;}
+
+  /* Painel de configuração da chave (só existe nesta página de teste) */
+  .setup{background:#0E2E0E; color:#D6F5C9; padding:16px 20px;}
+  .setup .row{max-width:960px; margin:0 auto; display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+  .setup label{font-size:12.5px; font-weight:700; color:#9DBF9D;}
+  .setup input{flex:1; min-width:260px; padding:9px 12px; border-radius:8px; border:1px solid #2D5F2D; background:#123812; color:#fff; font-family:monospace; font-size:12.5px;}
+  .setup button{background:var(--accent); color:#1A2E00; border:none; padding:9px 16px; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer;}
+  .setup button:hover{filter:brightness(1.08);}
+  .setup .status{font-size:12px; margin-left:auto;}
+  .setup .status.ok{color:#8DB600; font-weight:700;}
+  .setup .status.missing{color:#FCA5A5; font-weight:700;}
+  .setup .env-toggle{display:flex; gap:4px; background:#0B1F0B; border-radius:8px; padding:3px;}
+  .setup .env-toggle button{background:transparent; color:#9DBF9D; border:none; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;}
+  .setup .env-toggle button.active{background:var(--accent); color:#1A2E00;}
+  .setup .env-toggle button.active.prod{background:#F59E0B;}
+
+  /* Hero */
+  .hero{background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%); color:#fff; padding:64px 20px 90px; text-align:center;}
+  .hero h1{font-size:34px; font-weight:800; margin-bottom:12px; letter-spacing:-.5px;}
+  .hero p{font-size:16.5px; color:#D6F5C9; max-width:520px; margin:0 auto;}
+
+  .wrap{max-width:960px; margin:-56px auto 60px; padding:0 20px;}
+  .card{background:var(--surface); border-radius:16px; box-shadow:0 12px 32px rgba(0,0,0,.12); overflow:hidden; display:grid; grid-template-columns:1fr 1fr;}
+  @media(max-width:760px){ .card{grid-template-columns:1fr;} }
+
+  .pitch{padding:36px 32px; background:#FAFBFA;}
+  .pitch h2{font-size:20px; color:var(--primary); margin-bottom:14px;}
+  .pitch ul{margin:0; padding-left:20px; color:var(--text-2); font-size:14.5px;}
+  .pitch li{margin:8px 0;}
+
+  .form-area{padding:36px 32px;}
+  .form-area h2{font-size:18px; margin-bottom:4px;}
+  .form-area .sub{font-size:13px; color:var(--text-2); margin-bottom:20px;}
+  .f{margin-bottom:14px;}
+  .f label{display:block; font-size:12.5px; font-weight:700; color:var(--text); margin-bottom:5px;}
+  .f input, .f textarea{width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:9px; font-size:14px; font-family:inherit;}
+  .f input:focus, .f textarea:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:var(--primary);}
+  .submit-btn{width:100%; background:var(--primary); color:#fff; border:none; padding:13px; border-radius:10px; font-size:15px; font-weight:700; cursor:pointer; margin-top:6px;}
+  .submit-btn:hover{background:var(--primary-hover);}
+  .submit-btn:disabled{opacity:.6; cursor:default;}
+  .disclaimer{font-size:11px; color:#9CA3AF; margin-top:10px;}
+
+  /* Painel de debug (só nesta página de teste) */
+  .debug{max-width:960px; margin:0 auto 60px; padding:0 20px;}
+  .debug h3{font-size:14px; color:var(--text-2); margin-bottom:8px;}
+  .debug-log{background:#0B1F0B; color:#9DBF9D; border-radius:12px; padding:16px 18px; font-family:monospace; font-size:12.5px; min-height:70px; white-space:pre-wrap; word-break:break-all;}
+  .debug-log .empty{color:#5A7A5A;}
+  .debug-log .line{margin-bottom:8px; padding-bottom:8px; border-bottom:1px dashed #1F401F;}
+  .debug-log .line:last-child{border-bottom:none; margin-bottom:0;}
+  .debug-log .ok{color:#8DB600;}
+  .debug-log .err{color:#FCA5A5;}
+</style>
+</head>
+<body>
+
+<div class="test-banner">
+  ⚠️ PÁGINA DE TESTE — não é um site real do cliente. Usada para validar o WizMart Forms em homologação.
+</div>
+
+<div class="setup">
+  <div class="row">
+    <label>Ambiente:</label>
+    <div class="env-toggle">
+      <button id="wm-env-homolog" type="button" data-env="homolog">Homolog</button>
+      <button id="wm-env-prod" type="button" data-env="prod">Produção</button>
+    </div>
+    <label for="wm-key-input">Chave da fonte (wzk_...):</label>
+    <input id="wm-key-input" type="text" placeholder="Cole aqui a chave gerada em Configurações → Captação de Leads" autocomplete="off" />
+    <button id="wm-key-apply" type="button">Aplicar chave</button>
+    <span id="wm-key-status" class="status missing">nenhuma chave aplicada</span>
+  </div>
+</div>
+
+<div class="hero">
+  <h1>Smart Café para o seu negócio</h1>
+  <p>Máquinas de café e snacks por comodato, sem custo de instalação. Preencha o formulário e nossa equipe entra em contato.</p>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <div class="pitch">
+      <h2>Por que Smart Café</h2>
+      <ul>
+        <li>Instalação gratuita em até 5 dias úteis</li>
+        <li>Sem mensalidade fixa — você paga pelo consumo</li>
+        <li>Manutenção e reposição inclusas</li>
+        <li>Máquinas de café e snacks no mesmo contrato</li>
+      </ul>
+    </div>
+
+    <div class="form-area">
+      <h2>Quero saber mais</h2>
+      <div class="sub">Retornamos em até 1 dia útil.</div>
+
+      <form
+        id="lp-form"
+        data-wizmart-key=""
+        data-wizmart-endpoint=""
+        data-wizmart-success="Recebemos seu contato! Nossa equipe vai falar com você em breve."
+        data-wizmart-error="Não foi possível enviar agora. Tente novamente em instantes."
+      >
+        <div class="f">
+          <label for="f-name">Nome *</label>
+          <input id="f-name" type="text" name="name" required placeholder="Seu nome completo" />
+        </div>
+        <div class="f">
+          <label for="f-email">E-mail</label>
+          <input id="f-email" type="email" name="email" placeholder="voce@empresa.com.br" />
+        </div>
+        <div class="f">
+          <label for="f-phone">WhatsApp</label>
+          <input id="f-phone" type="tel" name="phone" placeholder="(11) 98765-4321" />
+        </div>
+        <div class="f">
+          <label for="f-company">Empresa</label>
+          <input id="f-company" type="text" name="company" placeholder="Nome da empresa" />
+        </div>
+        <div class="f">
+          <label for="f-message">Mensagem</label>
+          <textarea id="f-message" name="message" rows="2" placeholder="Conte um pouco sobre sua necessidade"></textarea>
+        </div>
+        <button class="submit-btn" type="submit">Quero saber mais</button>
+        <div class="disclaimer">Ao enviar, você concorda em ser contatado pela nossa equipe comercial.</div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="debug">
+  <h3>🔍 Painel de depuração (visível só nesta página de teste)</h3>
+  <div id="wm-debug-log" class="debug-log"><span class="empty">Nenhuma requisição enviada ainda. Preencha o formulário acima e clique em "Quero saber mais".</span></div>
+</div>
+
+<script>
+  // ── Config de ambiente + chave via UI ou ?env=/?key= na URL (só nesta página de teste) ──
+  (function () {
+    var ENDPOINTS = {
+      homolog: 'https://crm-codifyx.web.app/api/leads',
+      prod: 'https://wizmart-crm.web.app/api/leads',
+    };
+    var form = document.getElementById('lp-form');
+    var input = document.getElementById('wm-key-input');
+    var status = document.getElementById('wm-key-status');
+    var envBtns = {
+      homolog: document.getElementById('wm-env-homolog'),
+      prod: document.getElementById('wm-env-prod'),
+    };
+
+    function setStatus(key) {
+      if (key) {
+        status.textContent = 'chave aplicada: ' + key.slice(0, 12) + '…';
+        status.className = 'status ok';
+      } else {
+        status.textContent = 'nenhuma chave aplicada';
+        status.className = 'status missing';
+      }
+    }
+
+    function applyEnv(env) {
+      if (!ENDPOINTS[env]) env = 'homolog';
+      form.setAttribute('data-wizmart-endpoint', ENDPOINTS[env]);
+      form.removeAttribute('data-wizmart-bound');
+      envBtns.homolog.classList.toggle('active', env === 'homolog');
+      envBtns.prod.classList.toggle('active', env === 'prod');
+      envBtns.prod.classList.toggle('prod', env === 'prod');
+      try { localStorage.setItem('wm-test-env', env); } catch (e) {}
+      var url = new URL(window.location.href);
+      url.searchParams.set('env', env);
+      window.history.replaceState({}, '', url);
+      if (window.WizMartForms) window.WizMartForms.init();
+    }
+
+    function applyKey(key) {
+      form.setAttribute('data-wizmart-key', key || '');
+      // permite reenviar o form mesmo se o wizforms.js já tinha vinculado antes
+      form.removeAttribute('data-wizmart-bound');
+      setStatus(key);
+      if (key) {
+        try { localStorage.setItem('wm-test-key', key); } catch (e) {}
+        var url = new URL(window.location.href);
+        url.searchParams.set('key', key);
+        window.history.replaceState({}, '', url);
+        if (window.WizMartForms) window.WizMartForms.init();
+      }
+    }
+
+    var params = new URLSearchParams(window.location.search);
+    var savedEnv = null;
+    try { savedEnv = localStorage.getItem('wm-test-env'); } catch (e) {}
+    applyEnv(params.get('env') || savedEnv || 'homolog');
+
+    var urlKey = params.get('key');
+    var savedKey = null;
+    try { savedKey = localStorage.getItem('wm-test-key'); } catch (e) {}
+    var initialKey = urlKey || savedKey || '';
+    if (initialKey) input.value = initialKey;
+    applyKey(initialKey);
+
+    envBtns.homolog.addEventListener('click', function () { applyEnv('homolog'); });
+    envBtns.prod.addEventListener('click', function () { applyEnv('prod'); });
+
+    document.getElementById('wm-key-apply').addEventListener('click', function () {
+      applyKey(input.value.trim());
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); applyKey(input.value.trim()); }
+    });
+  })();
+
+  // ── Painel de depuração: intercepta o fetch feito pelo wizforms.js ─────────
+  (function () {
+    var log = document.getElementById('wm-debug-log');
+    var originalFetch = window.fetch;
+    window.fetch = function (url, opts) {
+      var startedAt = new Date().toLocaleTimeString('pt-BR');
+      return originalFetch.apply(this, arguments).then(function (res) {
+        res
+          .clone()
+          .json()
+          .catch(function () { return null; })
+          .then(function (body) {
+            var cls = res.ok ? 'ok' : 'err';
+            var line = document.createElement('div');
+            line.className = 'line';
+            line.innerHTML =
+              '<span class="' + cls + '">[' + startedAt + '] ' + opts.method + ' ' + url + ' → ' + res.status + '</span>\n' +
+              JSON.stringify(body, null, 2);
+            if (log.querySelector('.empty')) log.innerHTML = '';
+            log.prepend(line);
+          });
+        return res;
+      });
+    };
+  })();
+</script>
+
+<!-- Snippet real do WizMart Forms — mesmo script usado em produção -->
+<script src="https://crm-codifyx.web.app/wizforms.js"></script>
+
+</body>
+</html>

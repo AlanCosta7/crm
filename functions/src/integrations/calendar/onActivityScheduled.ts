@@ -20,7 +20,7 @@ import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from ".
 
 // ── Trigger automático ────────────────────────────────────────────────────────
 export const onActivityScheduled = onDocumentWritten(
-  "tenants/{tenantId}/activities/{activityId}",
+  { document: "tenants/{tenantId}/activities/{activityId}", region: "southamerica-east1" },
   async (event) => {
     const beforeData = event.data?.before.data();
     const afterData  = event.data?.after.data();
@@ -111,7 +111,9 @@ export const onActivityScheduled = onDocumentWritten(
 );
 
 // ── Callable: syncCalendarEvent ────────────────────────────────────────────────
-export const syncCalendarEvent = onCall(async (request) => {
+export const syncCalendarEvent = onCall(
+  { region: "southamerica-east1", secrets: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"] },
+  async (request) => {
   const { activityId, tenantId } = request.data as { activityId: string; tenantId: string };
   const uid = request.auth?.uid;
 
@@ -164,7 +166,9 @@ export const syncCalendarEvent = onCall(async (request) => {
 });
 
 // ── Callable: disconnectCalendar ───────────────────────────────────────────────
-export const disconnectCalendar = onCall(async (request) => {
+export const disconnectCalendar = onCall(
+  { region: "southamerica-east1", secrets: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"] },
+  async (request) => {
   const { tenantId } = request.data as { tenantId: string };
   const uid = request.auth?.uid;
 

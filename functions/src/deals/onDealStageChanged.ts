@@ -25,7 +25,7 @@ function getCurrentCycle(): string {
 }
 
 export const onDealStageChanged = onDocumentUpdated(
-  "tenants/{tenantId}/deals/{dealId}",
+  { document: "tenants/{tenantId}/deals/{dealId}", region: "southamerica-east1" },
   async (event) => {
     const before = event.data?.before.data();
     const after  = event.data?.after.data();
@@ -37,7 +37,10 @@ export const onDealStageChanged = onDocumentUpdated(
     const { tenantId, dealId } = event.params;
     const db = admin.firestore();
     const productId = after.productId || "wizmart";
-    const ownerId: string = after.assignedRepId || after.assignedSdrId || after.owner || "";
+    // responsibleId é mantido por onDealParticipantsChanged (sincronizado a cada
+    // escrita do deal) — fallback ao cálculo inline só para a rara corrida em que
+    // as duas CFs disparam no mesmo instante e essa ainda lê o valor pré-sync.
+    const ownerId: string = after.responsibleId || after.assignedRepId || after.assignedSdrId || after.owner || "";
     const newStage: string = after.stage;
 
     // ── Busca o funil e o estágio de destino ────────────────────────────────
@@ -73,10 +76,21 @@ export const onDealStageChanged = onDocumentUpdated(
     }
 
     // ── CohortKeys automáticos ────────────────────────────────────────────────
+    // Toda escrita de cohortKeys acontece AQUI (server-side): as security rules
+    // bloqueiam o cliente de escrevê-los, então o front nunca deve enviá-los.
     const cohortPatch: Record<string, any> = {};
 
-    if (newStage === "visita_agendada" && !after.cohortKeys?.visitScheduledMonth) {
+    // WizMart: visita_agendada | Smart Café: conectado
+    const isVisitStage = newStage === "visita_agendada" ||
+      (newStage === "conectado" && productId === "smart_cafe");
+    if (isVisitStage && !after.cohortKeys?.visitScheduledMonth) {
       cohortPatch["cohortKeys.visitScheduledMonth"] = nowMonth();
+    }
+
+    // BDR compartilhou o prospect com um SDR
+    if (newStage === "prospeccao" && after.bdrId && after.assignedSdrId &&
+        !after.cohortKeys?.prospectsSharedMonth) {
+      cohortPatch["cohortKeys.prospectsSharedMonth"] = nowMonth();
     }
 
     const isWonStage = newStage === "inaugurado" || newStage === "instalacao_realizada";

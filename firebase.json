@@ -20,11 +20,11 @@
     }
   ],
   "database": {
-    "instance": "crm-codifyx",
+    "instance": "wizmart-crm-default-rtdb",
     "rules": "database.rules.json"
   },
   "hosting": {
-    "site": "crm-codifyx",
+    "target": "wizmart-crm-app",
     "public": "dist",
     "ignore": [
       "firebase.json",
@@ -32,6 +32,13 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/leads",
+        "function": {
+          "functionId": "captureLead",
+          "region": "southamerica-east1"
+        }
+      },
       {
         "source": "**",
         "destination": "/index.html"

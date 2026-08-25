@@ -19,11 +19,18 @@ export { syncMoskit }     from "./integrations/syncMoskit";
 // Deals v2 — Convergência de funis (Fase 3)
 export { onDealStageChanged } from "./deals/onDealStageChanged";
 
+// Assinaturas do card — participantIds/responsibleId (Plano de Assinaturas, Fase A)
+export { onDealParticipantsChanged } from "./deals/syncDealParticipants";
+
+// Rastreio de passagem de bastão (Plano de Assinaturas, Fase C)
+export { onDealTimelineEvents } from "./deals/dealTimelineEvents";
+
 // Cadência SDR (Fase 4)
 export { dailyCadenceEngine } from "./cadence/dailyCadenceEngine";
 
 // Handoff Rep (Fase 5)
 export { acceptHandoff, declineHandoff } from "./handoff/acceptHandoff";
+export { onHandoffCreated } from "./handoff/onHandoffCreated";
 
 // SLA Rep + Overdue Checker (Fase 5)
 export { repSlaChecker, activityOverdueChecker } from "./cadence/repSlaChecker";
@@ -50,3 +57,10 @@ export { onProjectRequestCreated, onProjectRequestChanged } from "./projects/onP
 
 // Comissões — fila de avaliação do dia 10 (Fase 5)
 export { commissionEvaluationQueue } from "./comissoes/commissionEvaluationQueue";
+
+// ── Usuários ──────────────────────────────────────────────────────────────────
+export { inviteUser } from "./users/inviteUser";
+
+// ── Captação de Leads — WizMart Forms ─────────────────────────────────────────
+export { captureLead } from "./leads/captureLead";
+export { onLeadCreated } from "./leads/onLeadCreated";

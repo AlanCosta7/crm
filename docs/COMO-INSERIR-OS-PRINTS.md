@@ -1,10 +1,12 @@
-# Como inserir os prints no Guia do Admin Master
+# Como inserir os prints nos guias do cliente
 
 Você **não precisa editar o HTML**. Basta salvar cada print de tela com o **nome exato** abaixo,
-dentro da pasta `docs/assets/`. Ao reabrir o `WizMart-Guia-Admin-Master.html`, a imagem aparece sozinha
+dentro da pasta `docs/assets/`. Ao reabrir o guia correspondente, a imagem aparece sozinha
 no lugar da moldura. Se um arquivo não existir, a moldura continua mostrando a instrução.
 
-## Lista de imagens (salve em `docs/assets/`)
+## Guia do Administrador Master (`WizMart-Guia-Admin-Master.html`)
+
+### Lista de imagens (salve em `docs/assets/`)
 
 | Arquivo | Tela | O que destacar no print |
 |---|---|---|
@@ -18,6 +20,15 @@ no lugar da moldura. Se um arquivo não existir, a moldura continua mostrando a 
 | `08-projetos.png` | Projetos de Layout | Lista com status (Pendente/Em andamento/Entregue) |
 | `09-comissoes.png` | Comissões (calculadora) | Seleção do negócio, faturamento e o quadro "Resultado" |
 | `10-relatorio-comissoes.png` | Relatório de Comissões | Filtros, total por vendedor e botão "Exportar CSV" |
+
+## Guia de Captação de Leads (`WizMart-Guia-Captacao-Leads.html`)
+
+### Lista de imagens (salve em `docs/assets/`)
+
+| Arquivo | Tela | O que destacar no print |
+|---|---|---|
+| `leads-01-lista.png` | Configurações → Captação de Leads | Tabela de fontes, contadores de recebidos/bloqueados e o botão "Nova Fonte" |
+| `leads-02-chave.png` | Modal de chave gerada | O campo com a chave e o botão "Copiar" |
 
 ## Dicas
 

@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
 import { Av } from '../ui/Av';
 import { Icon } from '../ui/Icon';
+import { NotificationsBell } from './NotificationsBell';
 import type { ProductId, ProductScope } from '../../types/crm';
 import { allowedProductIds, canUseAllScope, ensureAllowedScope } from '../../utils/productScope';
 
@@ -209,9 +210,7 @@ export function Topbar({ crumbs }: TopbarProps) {
         </div>
 
         {/* Notificações */}
-        <button className="icon-btn" title="Notificações" aria-label="Notificações">
-          <Icon name="Bell" size={19} />
-        </button>
+        <NotificationsBell />
 
         <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
 

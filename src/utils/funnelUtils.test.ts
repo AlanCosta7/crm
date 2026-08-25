@@ -16,6 +16,7 @@ import {
   isDealOverSla,
   visibleFunnelTypes,
   canMoveDeal,
+  canConfirmHandoff,
   applyTemplate,
 } from './funnelUtils';
 import type { Funnel, FunnelStage, Deal, UserRole } from '../types/crm';
@@ -264,10 +265,21 @@ describe('visibleFunnelTypes', () => {
 // ── canMoveDeal ───────────────────────────────────────────────────────────────
 describe('canMoveDeal', () => {
   const canRoles: UserRole[]    = ['master', 'manager', 'bdr', 'sdr', 'rep'];
-  const cannotRoles: UserRole[] = ['viewer'];
+  // design: security rules de deals só permitem update para papéis operacionais
+  const cannotRoles: UserRole[] = ['viewer', 'design'];
 
   canRoles.forEach(r    => it(`${r} pode mover deals`,    () => expect(canMoveDeal(r)).toBe(true)));
   cannotRoles.forEach(r => it(`${r} não pode mover deals`,() => expect(canMoveDeal(r)).toBe(false)));
+});
+
+// ── canConfirmHandoff ─────────────────────────────────────────────────────────
+describe('canConfirmHandoff', () => {
+  // Espelha a rule handoffs.create (isSdr): só SDR e gestão passam o bastão.
+  const canRoles: UserRole[]    = ['master', 'manager', 'sdr'];
+  const cannotRoles: UserRole[] = ['bdr', 'rep', 'viewer', 'design'];
+
+  canRoles.forEach(r    => it(`${r} pode confirmar handoff`,     () => expect(canConfirmHandoff(r)).toBe(true)));
+  cannotRoles.forEach(r => it(`${r} não pode confirmar handoff`, () => expect(canConfirmHandoff(r)).toBe(false)));
 });
 
 // ── applyTemplate ─────────────────────────────────────────────────────────────

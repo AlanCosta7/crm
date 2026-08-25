@@ -17,7 +17,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 
 export const onCoinTransactionCreated = onDocumentCreated(
-  "tenants/{tenantId}/coin_ledger/{txId}",
+  { document: "tenants/{tenantId}/coin_ledger/{txId}", region: "southamerica-east1" },
   async (event) => {
     const txData = event.data?.data();
     if (!txData) return;

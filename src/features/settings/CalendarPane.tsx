@@ -23,7 +23,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { buildOAuthStartUrl, isCalendarConnected, type CalendarTokenData } from '../../utils/calendarUtils';
 
 const FUNCTIONS_URL = import.meta.env.VITE_FUNCTIONS_URL
-  || 'https://southamerica-east1-wizmart-crm.cloudfunctions.net';
+  || 'https://southamerica-east1-codifyx7.cloudfunctions.net';
 
 export function CalendarPane() {
   const { user } = useAuthStore();

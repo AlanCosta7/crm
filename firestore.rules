@@ -53,9 +53,42 @@ service cloud.firestore {
       return isTenant(tid) && getRole() != 'viewer' && getRole() != 'design';
     }
 
-    // Roles que podem ver deals (todos os membros autenticados do tenant, incluindo viewer e design)
-    function canReadDeals(tid) {
-      return isTenant(tid);
+    // Papéis sem "assinatura" própria (nunca são bdrId/assignedSdrId/assignedRepId/owner
+    // de um deal) — tratados como leitura ampla nas regras de deals, igual ao manager
+    // (decisão confirmada com o Alan, 22/08: sem essa exceção, Viewer e Design
+    // ficariam sem ver nenhum negócio).
+    function canSeeAllDeals(tid) {
+      return isManager(tid) || isDesign(tid) || (isTenant(tid) && getRole() == 'viewer');
+    }
+
+    // Participante de um deal: verifica participantIds (mantido pela CF
+    // onDealParticipantsChanged) E, em paralelo, os 4 campos de origem
+    // (owner/bdrId/assignedSdrId/assignedRepId) diretamente — não só por
+    // redundância defensiva, mas porque participantIds só existe depois que a
+    // CF roda; um deal recém-criado por um caminho que não passa pelo client
+    // (ex.: Admin SDK) fica sem o campo até a 1ª sincronização, e a leitura não
+    // pode depender dessa corrida.
+    function isDealParticipant(data) {
+      return request.auth.uid in data.get('participantIds', [])
+        || request.auth.uid == data.get('owner', '')
+        || request.auth.uid == data.get('bdrId', '')
+        || request.auth.uid == data.get('assignedSdrId', '')
+        || request.auth.uid == data.get('assignedRepId', '');
+    }
+
+    // Leitura: manager/design/viewer veem tudo; os demais só o que participam.
+    function canReadDeals(tid, data) {
+      return canSeeAllDeals(tid) || (isTenant(tid) && isDealParticipant(data));
+    }
+
+    // Edição: só master/manager têm bypass total — diferente da leitura,
+    // Viewer/Design NUNCA editam (isOperational já os exclui; usar
+    // canSeeAllDeals aqui seria dar edição a quem só devia ter visão).
+    // Confirmado com o Alan (22/08): TODOS os 3 papéis que já assinaram o card
+    // (BDR/SDR/Rep) podem editar, não só quem tem o bastão agora — por isso o
+    // gate é isDealParticipant, não responsibleId.
+    function canEditDeal(tid, data) {
+      return isManager(tid) || (isOperational(tid) && isDealParticipant(data));
     }
 
     function tokenProducts() {
@@ -95,9 +128,13 @@ service cloud.firestore {
       // Deals / Negócios
       // design: somente leitura
       match /deals/{dealId} {
-        allow read:   if canReadDeals(tid) && canAccessDocProduct(resource.data);
-        allow create: if isBdr(tid) && requestProductAllowed();
-        allow update: if isOperational(tid)
+        allow read:   if canReadDeals(tid, resource.data) && canAccessDocProduct(resource.data);
+        // Todo usuário operacional pode criar um card — a restrição de
+        // participação vale só para EDIÇÃO de cards já existentes (confirmado
+        // com o Alan, 22/08). Antes: isBdr(tid) (só master/manager/bdr) negava
+        // a criação pro SDR mesmo o client já tratando esse caso.
+        allow create: if isOperational(tid) && requestProductAllowed();
+        allow update: if canEditDeal(tid, resource.data)
                       && canAccessDocProduct(resource.data)
                       && requestProductAllowed()
                       && notWritingCohortKeys();
@@ -221,6 +258,30 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // ── Captação de Leads (WizMart Forms) ─────────────────────────────────
+      // Fontes de captação: gerenciadas pelo master/manager na UI.
+      // Só o hash SHA-256 da chave é armazenado (a chave em claro nunca).
+      match /lead_sources/{sourceId} {
+        allow read:   if isManager(tid);
+        allow create: if isManager(tid);
+        allow update: if isManager(tid);
+        allow delete: if isMaster(tid);
+      }
+
+      // Leads brutos: escrita EXCLUSIVA da Cloud Function captureLead (Admin SDK)
+      match /leads/{leadId} {
+        allow read:  if isManager(tid);
+        allow write: if false;
+      }
+
+      // Notificações in-app: usuário lê as próprias e só pode marcar como lida
+      match /notifications/{notificationId} {
+        allow read:   if isTenant(tid) && resource.data.userId == request.auth.uid;
+        allow update: if isTenant(tid) && resource.data.userId == request.auth.uid
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+        allow create, delete: if false; // somente Cloud Functions
+      }
+
       // KPI Snapshots
       match /kpi_snapshots/{snapshotId} {
         allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
@@ -253,6 +314,15 @@ service cloud.firestore {
       match /payment_events/{eventId} {
         allow read:   if isManager(tid);
         allow write:  if false; // somente webhook Cloud Function
+      }
+
+      // Configuração de cadência — gestão (manager/master) programa a régua
+      // dos SDRs e o SLA dos Reps manualmente (Observações do cliente, jul/2026).
+      // Leitura liberada pro SDR também (24/08/2026): a sequência de contato
+      // configurada aqui precisa aparecer como orientação na tela dele.
+      match /settings/cadence {
+        allow read:   if isSdr(tid);
+        allow write:  if isManager(tid);
       }
 
       // Configurações e Integrações (somente master)
@@ -293,13 +363,21 @@ service cloud.firestore {
       // ── v3: Timeline do Deal ───────────────────────────────────────────────
       // Leitura para quem pode ver deals; escrita exclusiva via Cloud Functions
       match /deal_timeline/{dealId} {
-        allow read:   if canReadDeals(tid);
+        // Espelha a leitura do deal pai: quem sai de participantIds (Rep que
+        // recusou, SDR substituído) deixa de ver o histórico daquele card também.
+        allow read:   if canReadDeals(tid, get(/databases/$(database)/documents/tenants/$(tid)/deals/$(dealId)).data);
 
         match /events/{eventId} {
-          allow read:   if canReadDeals(tid);
+          allow read:   if canReadDeals(tid, get(/databases/$(database)/documents/tenants/$(tid)/deals/$(dealId)).data);
           allow write:  if false; // somente Cloud Functions
         }
       }
+    }
+
+    // ── Rate limit do endpoint público de leads (coleção raiz) ───────────────
+    // Somente a Cloud Function captureLead (Admin SDK) lê/escreve.
+    match /rate_limits/{docId} {
+      allow read, write: if false;
     }
   }
 }

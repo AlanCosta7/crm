@@ -16,17 +16,27 @@ import anime from 'animejs';
 import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
 import { useAuthStore } from '../../stores/authStore';
 import { isDealComissionavel } from '../comissoes/calc';
-import type { Deal, Seller, Stage, ProductSKU, Contact, Activity } from '../../types/crm';
+import type { Deal, Seller, Stage, ProductSKU, Contact, Activity, Handoff } from '../../types/crm';
 import {
   PRODUCT_SKU_LABELS,
   PRODUCT_SKU_BY_FUNNEL,
 } from '../../types/crm';
 import { Icon } from '../../components/ui/Icon';
+import { Av } from '../../components/ui/Av';
 import { fmtCurrency, sellerById } from '../../utils/crmFormat';
 import { ProjectRequestModal } from '../projetos/ProjectRequestModal';
 import { EmailActionModal } from './actions/EmailActionModal';
 import { WhatsAppActionModal } from './actions/WhatsAppActionModal';
 import { MeetingActionModal } from './actions/MeetingActionModal';
+import { StandbyModal } from './StandbyModal';
+import { LostReasonModal } from './LostReasonModal';
+import { getLostReasonLabel, requeuesToBdr } from '../../utils/lostReasonUtils';
+import { getLastActivityAt, isCardExpired, daysSinceLastActivity } from '../../utils/cardExpirationUtils';
+import type { LostReasonId } from '../../types/crm';
+import { dealParticipantConstraint } from '../../utils/dealQueryScope';
+import { COMPANY_SIZE_LABEL, COMPANY_SIZE_COLOR, effectiveCompanySize, type CompanySizeEstimate } from '../../utils/companySize';
+import { getSdrWorkload } from '../../utils/sdrWorkload';
+import { AssignSdrModal } from '../pipeline/AssignSdrModal';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -34,6 +44,8 @@ interface DealSidebarProps {
   dealId: string;
   onClose: () => void;
   onPoints: (g: { k?: string; title?: string; pts: number; label?: string; custom?: string }) => void;
+  /** 'panel' (padrão): painel lateral com overlay | 'page': página inteira (rota /lead/:id) */
+  variant?: 'panel' | 'page';
 }
 
 const GTASKS = [
@@ -93,20 +105,31 @@ function fmtCnpj(v: string) {
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
-  const [tab, setTab] = useState<'overview' | 'produtos' | 'activities' | 'history'>('overview');
+export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: DealSidebarProps) {
+  const [tab, setTab] = useState<'overview' | 'produtos' | 'activities' | 'notas' | 'history'>('overview');
+  const isPage = variant === 'page';
 
   const navigate = useNavigate();
   const { user } = useAuthStore();
 
-  const { data: deals }   = useFirestoreCollection<Deal>('deals');
+  const { data: deals }   = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
   const { data: sellers } = useFirestoreCollection<Seller>('sellers');
   const { data: stages }  = useFirestoreCollection<Stage>('stages');
   const { data: contacts } = useFirestoreCollection<Contact>('contacts');
   const { data: activities } = useFirestoreCollection<Activity>('activities');
+  // Jornada do lead: handoffs deste deal (viewer/design não leem — hook devolve vazio)
+  const { data: handoffs } = useFirestoreCollection<Handoff>('handoffs');
+  // SDRs ativos + carga atual — só usado pro botão "Atribuir SDR" (Fase D2/D3),
+  // mas o hook precisa rodar sempre (Rules of Hooks).
+  const { data: allUsers } = useFirestoreCollection<any>('users');
   const { updateDocument } = useFirestoreMutations('deals');
+  const { addDocument: addActivity, updateDocument: updateActivity } = useFirestoreMutations('activities');
 
   const deal = deals.find(d => d.id === dealId);
+
+  // ── Estado notas ──────────────────────────────────────────────────────────
+  const [noteText, setNoteText] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   // Modal de ação ativo (email / whatsapp / reunião)
   const [actionModal, setActionModal] = useState<'email' | 'whatsapp' | 'meeting' | null>(null);
@@ -127,6 +150,22 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
   const [savingProducts, setSavingProducts] = useState(false);
   const [selectedAdditional, setSelectedAdditional] = useState<ProductSKU[]>([]);
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [showStandbyModal, setShowStandbyModal] = useState(false);
+  const [showLostReasonModal, setShowLostReasonModal] = useState(false);
+
+  // ── Estado de edição do negócio (nome, empresa, valor, vencimento) ────────
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editCompany, setEditCompany] = useState('');
+  const [editValue, setEditValue] = useState('');
+  const [editDue, setEditDue] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // ── Estado porte estimado (Fase D3) ───────────────────────────────────────
+  const [savingSize, setSavingSize] = useState(false);
+
+  // ── Estado atribuição manual de SDR (Fase D2) ─────────────────────────────
+  const [showAssignSdrModal, setShowAssignSdrModal] = useState(false);
 
   useEffect(() => {
     if (deal) setSelectedAdditional(deal.additionalProducts ?? []);
@@ -144,6 +183,12 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
   }, [dealId]);
 
   if (!deal) return null;
+
+  // Vencimento do card por inatividade (Observações do cliente, jul/2026):
+  // 21 dias sem atividade concluída.
+  const lastActivityAt = getLastActivityAt(activities, deal.id);
+  const cardExpired = isCardExpired(deal, lastActivityAt);
+  const daysInactive = daysSinceLastActivity(deal, lastActivityAt);
 
   const s  = sellerById(sellers, deal.assignedRepId || deal.assignedSdrId || deal.owner);
   // fallback estágio: usa deal.stage como nome se não encontrado em legado
@@ -167,19 +212,193 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
     setActionModal(TASK_TO_ACTION[g.k]);
   };
 
-  const handleStageChange = async (newStatus: 'won' | 'lost') => {
+  const handleStageChange = async (newStatus: 'won') => {
     try {
+      // cohortKeys (conquestMonth) são gravados pela CF onDealStageChanged ao
+      // detectar o novo estágio — escrevê-los aqui violava as security rules
+      // e fazia o botão Ganhou falhar silenciosamente para todos os papéis.
       await updateDocument(deal.id, {
         status: newStatus,
-        stage: newStatus === 'won'
-          ? (deal.productId === 'smart_cafe' ? 'instalacao_realizada' : 'inaugurado')
-          : deal.stage,
-        ...(newStatus === 'won' ? { cohortKeys: { ...deal.cohortKeys, conquestMonth: new Date().toISOString().slice(0, 7) } } : {}),
+        stage: deal.productId === 'smart_cafe' ? 'instalacao_realizada' : 'inaugurado',
         updatedAt: new Date(),
       });
       onClose();
     } catch (err) {
       console.error(err);
+      onPoints({ pts: 0, custom: '⚠️ Não foi possível atualizar o negócio. Tente novamente.' });
+    }
+  };
+
+  // Perder exige motivo estruturado (Observações do cliente, jul/2026) — ver
+  // LostReasonModal. Dois motivos devolvem o lead ao BDR para nova tentativa.
+  const handleConfirmLost = async (reasonId: LostReasonId, note: string) => {
+    const requeue = requeuesToBdr(reasonId);
+    const patch: Record<string, any> = {
+      status: 'lost',
+      lostReason: reasonId,
+      updatedAt: new Date(),
+    };
+    if (note) patch.lostReasonNote = note;
+    if (requeue) {
+      patch.assignedSdrId = null;
+      patch.requeuedForBdr = true;
+      patch.requeuedAt = new Date();
+    }
+    await updateDocument(deal.id, patch);
+
+    if (user?.uid) {
+      const label = getLostReasonLabel(reasonId);
+      await addActivity({
+        type: 'note',
+        dealId: deal.id,
+        userId: user.uid,
+        text: `Negócio perdido — ${label}${requeue ? ' (devolvido ao BDR para nova tentativa)' : ''}`,
+        status: 'completed',
+        cadenceType: 'manual',
+        coinsAwarded: 0,
+        wasOnTime: true,
+        productId: deal.productId || 'wizmart',
+      });
+    }
+
+    setShowLostReasonModal(false);
+    onPoints({ pts: 0, custom: requeue ? '↩️ Negócio perdido — devolvido ao BDR' : '❌ Negócio marcado como perdido' });
+    onClose();
+  };
+
+  // Papéis operacionais podem favoritar/anotar (viewer e design são leitura)
+  const canEditDeal = user?.role !== 'viewer' && user?.role !== 'design';
+
+  const toggleFavorite = async () => {
+    try {
+      await updateDocument(deal.id, { isFavorite: !deal.isFavorite, updatedAt: new Date() });
+    } catch (err) {
+      console.error(err);
+      onPoints({ pts: 0, custom: '⚠️ Não foi possível atualizar o favorito.' });
+    }
+  };
+
+  // Porte estimado (Fase D3) — BDR chuta na criação, SDR revisa depois de
+  // pesquisar mais a fundo. Campo simples, sem histórico de quem mudou.
+  const canEditCompanySize = user?.role === 'bdr' || user?.role === 'sdr' || user?.role === 'master' || user?.role === 'manager';
+  const updateCompanySize = async (size: CompanySizeEstimate) => {
+    setSavingSize(true);
+    try {
+      await updateDocument(deal.id, { companySizeEstimate: size, updatedAt: new Date() });
+    } catch (err) {
+      console.error('[DealSidebar] Erro ao atualizar porte:', err);
+    } finally {
+      setSavingSize(false);
+    }
+  };
+
+  // Atribuição manual BDR→SDR (Fase D2) — mesma ação que já existia só no
+  // painel do BDR ("Leads aguardando distribuição"), agora também aqui no
+  // card, que é onde o Alan esperava encontrar. Só o BDR dono do lead (ou
+  // gestão) vê o botão, e só enquanto o lead ainda está em `in_queue`.
+  const canAssignSdr = deal.status === 'in_queue'
+    && (user?.role === 'manager' || user?.role === 'master' || (user?.role === 'bdr' && deal.bdrId === user?.uid));
+  const activeSdrs = allUsers.filter((u: any) => u.role === 'sdr' && u.isActive !== false);
+  // `deals` já vem restrito a participação (mesmo caveat documentado em
+  // PainelBDR/DashboardPage.tsx: carga pode ficar subestimada pra SDRs que
+  // também trabalham leads de outros BDRs — fix correto é um callable).
+  const sdrWorkloads = getSdrWorkload(deals, activeSdrs.map((s: any) => s.id), deal.productId || 'wizmart');
+  const handleAssignSdr = async (data: { sdrId: string; notes?: string }) => {
+    await updateDocument(deal.id, {
+      status: 'open',
+      assignedSdrId: data.sdrId,
+      assignedAt: new Date(),
+      updatedAt: new Date(),
+    });
+    if (user?.uid) {
+      await addActivity({
+        type: 'note',
+        dealId: deal.id,
+        userId: user.uid,
+        text: `Atribuído diretamente pelo BDR${data.notes ? ` — ${data.notes}` : ''}`,
+        status: 'completed',
+        coinsAwarded: 0,
+        wasOnTime: true,
+        cadenceType: 'manual',
+        productId: deal.productId || 'wizmart',
+      });
+    }
+    setShowAssignSdrModal(false);
+  };
+
+  // Registra (conclui) uma atividade pendente do próprio usuário — usado
+  // principalmente para os follow-ups do Standby. A CF onActivityCompleted
+  // cuida das moedas.
+  const handleCompleteActivity = async (a: Activity) => {
+    if (!a.id) return;
+    try {
+      await updateActivity(a.id, {
+        status: 'completed',
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      });
+      onPoints({ pts: 0, custom: '✅ Follow-up registrado!' });
+    } catch (err) {
+      console.error('[DealSidebar] Erro ao registrar atividade:', err);
+      onPoints({ pts: 0, custom: '⚠️ Não foi possível registrar o follow-up.' });
+    }
+  };
+
+  const handleAddNote = async () => {
+    const text = noteText.trim();
+    if (!text || !user?.uid) return;
+    setSavingNote(true);
+    try {
+      await addActivity({
+        type: 'note',
+        dealId: deal.id,
+        userId: user.uid,
+        text,
+        status: 'completed',
+        cadenceType: 'manual',
+        coinsAwarded: 0,
+        wasOnTime: true,
+        productId: deal.productId || 'wizmart',
+      });
+      setNoteText('');
+      onPoints({ pts: 0, custom: '📝 Nota registrada no card' });
+    } catch (err) {
+      console.error(err);
+      onPoints({ pts: 0, custom: '⚠️ Não foi possível salvar a nota.' });
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  // Edição do negócio (nome, empresa, valor, vencimento) — os botões "Editar"
+  // e o lápis ao lado do nome não tinham handler algum (bug relatado pelo
+  // cliente); abrem/fecham este modo de edição inline.
+  const openEdit = () => {
+    setEditName(deal.name);
+    setEditCompany(deal.company);
+    setEditValue(String(deal.value ?? 0));
+    setEditDue(deal.due && deal.due !== '—' ? deal.due : '');
+    setIsEditing(true);
+  };
+  const cancelEdit = () => setIsEditing(false);
+  const saveEdit = async () => {
+    if (!editName.trim() || !editCompany.trim()) return;
+    setSavingEdit(true);
+    try {
+      await updateDocument(deal.id, {
+        name: editName.trim(),
+        company: editCompany.trim(),
+        value: parseFloat(editValue.replace(',', '.')) || 0,
+        due: editDue.trim() || '—',
+        updatedAt: new Date(),
+      });
+      setIsEditing(false);
+      onPoints({ pts: 0, custom: '✅ Negócio atualizado' });
+    } catch (err) {
+      console.error('[DealSidebar] Erro ao editar deal:', err);
+      onPoints({ pts: 0, custom: '⚠️ Não foi possível salvar as alterações.' });
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -234,6 +453,35 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
   const renderOverview = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+      {/* Vencimento do card — 21 dias sem atividade (Observações do cliente, jul/2026) */}
+      {cardExpired && (
+        <div style={{ display: 'flex', gap: 10, padding: '12px 14px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+          <Icon name="AlarmClockOff" size={18} color="#B91C1C" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#B91C1C' }}>
+              Card vencido — {daysInactive} dias sem atividade
+            </div>
+            <p style={{ fontSize: 12, color: '#7F1D1D', margin: '2px 0 8px' }}>
+              Nenhuma atividade concluída há 3 semanas ou mais. Marque o motivo da perda ou reative com Standby.
+            </p>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btn-danger btn-sm" onClick={() => setShowLostReasonModal(true)}>
+                <Icon name="X" size={13} /> Marcar como perdido
+              </button>
+              {!deal.standbyActive && (
+                <button
+                  className="btn btn-sm"
+                  style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #F59E0B44' }}
+                  onClick={() => setShowStandbyModal(true)}
+                >
+                  <Icon name="PauseCircle" size={13} /> Reativar com Standby
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Atalho: calcular comissão (gestor, negócio ativado) */}
       {podeComissionar && (
         <button
@@ -264,6 +512,80 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
           </div>
         ))}
       </div>
+
+      {/* Assinaturas do card — quem participou de cada etapa fica sempre visível,
+          mesmo depois da passagem de bastão (Observações do cliente, jul/2026) */}
+      {(deal.bdrId || deal.assignedSdrId || deal.assignedRepId) && (
+        <div className="card" style={{ padding: '12px 14px' }}>
+          <div className="label" style={{ fontSize: 10.5, marginBottom: 8 }}>Equipe do lead</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[
+              { label: 'BDR (origem)',        uid: deal.bdrId },
+              { label: 'SDR responsável',     uid: deal.assignedSdrId },
+              { label: 'Representante',       uid: deal.assignedRepId },
+            ].filter(r => r.uid).map(r => {
+              const person = sellerById(sellers, r.uid!);
+              return (
+                <div key={r.label} className="row" style={{ gap: 8 }}>
+                  <Av initials={person.initials} color={person.color} size={24} />
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>{person.name}</span>
+                  <span className="muted" style={{ fontSize: 11.5, marginLeft: 'auto' }}>{r.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Porte estimado da empresa (Fase D3) — chute do BDR, refinável pelo SDR.
+          Diferente do clientSize do Smart Café (qualificação formal, mais abaixo). */}
+      <div className="card" style={{ padding: '12px 14px' }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: canEditCompanySize ? 8 : 0 }}>
+          <div className="label" style={{ fontSize: 10.5 }}>Porte estimado da empresa</div>
+          <span style={{
+            fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 100,
+            background: COMPANY_SIZE_COLOR[effectiveCompanySize(deal)].bg,
+            color: COMPANY_SIZE_COLOR[effectiveCompanySize(deal)].text,
+            border: `1px solid ${COMPANY_SIZE_COLOR[effectiveCompanySize(deal)].border}`,
+          }}>
+            {COMPANY_SIZE_LABEL[effectiveCompanySize(deal)]}{!deal.companySizeEstimate && ' (padrão)'}
+          </span>
+        </div>
+        {canEditCompanySize && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['P', 'M', 'G'] as const).map(sz => (
+              <button
+                key={sz}
+                type="button"
+                disabled={savingSize}
+                onClick={() => updateCompanySize(sz)}
+                className={`btn btn-sm ${effectiveCompanySize(deal) === sz ? 'btn-primary' : 'btn-outline'}`}
+                style={{ flex: 1 }}
+              >
+                {COMPANY_SIZE_LABEL[sz]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Motivo da perda estruturado (Observações do cliente, jul/2026) */}
+      {deal.status === 'lost' && (
+        <div className="card" style={{ padding: '12px 14px', background: '#FEF2F2', border: '1px solid #FECACA' }}>
+          <div className="row" style={{ gap: 8 }}>
+            <Icon name="X" size={15} color="#B91C1C" />
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: '#B91C1C' }}>{getLostReasonLabel(deal.lostReason)}</div>
+              {deal.lostReasonNote && <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{deal.lostReasonNote}</div>}
+              {deal.requeuedForBdr && (
+                <div style={{ fontSize: 11, color: '#92400E', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Icon name="RotateCcw" size={11} /> Devolvido ao BDR para nova tentativa
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Smart Café — porte + conexão */}
       {deal.productId === 'smart_cafe' && (deal.clientSize || deal.connectionType) && (
@@ -547,16 +869,28 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
             {dealActivities.map((a, i) => {
               const ic = ACT_ICON[a.type] ?? ACT_ICON.note;
               const who = sellerById(sellers, a.userId).name;
+              const isStandby = (a as any).cadenceType === 'standby';
+              const canComplete = a.status === 'pending' && a.userId === user?.uid;
               return (
                 <div key={a.id ?? i} className="tl-item">
                   <div className="tl-ic" style={{ background: ic.c }}>
                     <Icon name={ic.i as any} size={15} />
                   </div>
                   <div className="tl-body">
-                    <div>{a.outcome || ic.label}</div>
-                    <div className="tl-time">
+                    <div>{a.outcome || (a as any).text || ic.label}</div>
+                    <div className="tl-time" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       {ic.label} · {who} · {fmtWhen(a)}
-                      {a.status === 'pending' && <span className="badge" style={{ marginLeft: 6, background: '#FEF3C7', color: '#B45309', fontSize: 10 }}>Agendado</span>}
+                      {isStandby && <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', fontSize: 10 }}>⏸ Standby {(a as any).standbyIndex}/{(a as any).standbyTotal}</span>}
+                      {a.status === 'pending' && <span className="badge" style={{ background: '#FEF3C7', color: '#B45309', fontSize: 10 }}>Agendado</span>}
+                      {canComplete && (
+                        <button
+                          className="btn btn-outline btn-sm"
+                          style={{ padding: '2px 10px', fontSize: 11 }}
+                          onClick={() => handleCompleteActivity(a)}
+                        >
+                          <Icon name="Check" size={12} /> Registrar
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -568,14 +902,79 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
     );
   };
 
-  const renderHistory = () => (
+  // Jornada completa do lead: criação → BDR → SDR → handoff → Rep → desfecho
+  // (Observações do cliente, jul/2026 — visível mesmo após o bastão passado)
+  const renderHistory = () => {
+    const fmtTs = (raw: any): string => {
+      const d = raw?.toDate ? raw.toDate() : raw ? new Date(raw) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      return `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: '2-digit' })}, ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    };
+    const nameOf = (uid?: string) => (uid ? sellerById(sellers, uid).name : '—');
+
+    const dealHandoffs = handoffs
+      .filter(h => h.dealId === deal.id)
+      .sort((a, b) => (a.createdAt?.toDate?.()?.getTime?.() ?? 0) - (b.createdAt?.toDate?.()?.getTime?.() ?? 0));
+
+    interface JourneyStep { icon: string; color: string; text: string; time: string }
+    const steps: JourneyStep[] = [];
+
+    steps.push({
+      icon: 'Sparkles', color: '#6366F1',
+      text: deal.bdrId ? `Lead criado por ${nameOf(deal.bdrId)} (BDR)` : `Lead criado por ${nameOf(deal.owner)}`,
+      time: fmtTs(deal.createdAt) || 'criação',
+    });
+
+    if (deal.leadOrigin) {
+      steps.push({ icon: 'Globe', color: '#0369A1', text: `Captado via ${deal.leadOrigin.sourceName}`, time: fmtTs(deal.createdAt) });
+    }
+
+    if (deal.assignedSdrId) {
+      steps.push({
+        icon: 'ListChecks', color: '#B45309',
+        text: `Distribuído para ${nameOf(deal.assignedSdrId)} (SDR) trabalhar a cadência`,
+        time: fmtTs((deal as any).assignedAt) || 'cadência',
+      });
+    }
+
+    if (deal.standbyActive) {
+      steps.push({
+        icon: 'PauseCircle', color: '#92400E',
+        text: `Standby ativado — régua de ${deal.standbyFollowUps ?? 5} follow-ups em andamento`,
+        time: fmtTs(deal.standbyStartedAt),
+      });
+    }
+
+    for (const h of dealHandoffs) {
+      steps.push({
+        icon: 'ArrowRightLeft', color: '#7C3AED',
+        text: `Passagem de bastão: ${nameOf(h.fromSdrId)} → ${nameOf(h.toRepId)}`,
+        time: fmtTs(h.createdAt),
+      });
+      if (h.status === 'accepted') {
+        steps.push({ icon: 'CheckCircle2', color: '#16A34A', text: `Handoff aceito por ${nameOf(h.toRepId)} (Rep)`, time: fmtTs(h.acceptedAt) });
+      } else if (h.status === 'declined') {
+        steps.push({ icon: 'XCircle', color: '#B91C1C', text: `Handoff recusado${h.declinedReason ? ` — ${h.declinedReason}` : ''}`, time: fmtTs((h as any).updatedAt) });
+      }
+    }
+
+    if (deal.status === 'won') {
+      steps.push({ icon: 'Trophy', color: '#1A6B1A', text: 'Negócio ganho 🏆', time: fmtTs(deal.updatedAt) });
+    } else if (deal.status === 'lost') {
+      const reasonLabel = getLostReasonLabel(deal.lostReason);
+      steps.push({
+        icon: 'X', color: '#B91C1C',
+        text: `Negócio perdido — ${reasonLabel}${deal.requeuedForBdr ? ' (devolvido ao BDR para nova tentativa)' : ''}`,
+        time: fmtTs(deal.updatedAt),
+      });
+    } else {
+      steps.push({ icon: 'ArrowRight', color: '#6366F1', text: `Estágio atual: ${stageName} — com ${s.name}`, time: 'agora' });
+    }
+
+    return (
     <div>
       <div className="tl">
-        {[
-          { icon: 'ArrowRight', color: '#6366F1', text: `Estágio atual: ${stageName}`,              time: 'agora' },
-          { icon: 'User',       color: '#1A6B1A', text: `Responsável: ${s.name}`,                  time: 'criação' },
-          { icon: 'Calendar',   color: '#F59E0B', text: `Vencimento: ${deal.due}`,                  time: 'definido' },
-        ].map((h, i) => (
+        {steps.map((h, i) => (
           <div key={i} className="tl-item">
             <div className="tl-ic" style={{ background: h.color }}>
               <Icon name={h.icon as any} size={14} />
@@ -600,52 +999,232 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
         </div>
       )}
     </div>
-  );
+    );
+  };
+
+  // ── Aba Notas — comunicação SDR ↔ Rep e correções eventuais ───────────────
+  const renderNotas = () => {
+    const fmtWhen = (a: Activity): string => {
+      const raw = a.createdAt;
+      const d = raw?.toDate ? raw.toDate() : raw ? new Date(raw) : null;
+      if (!d || isNaN(d.getTime())) return '';
+      return `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}, ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    };
+
+    const notes = activities
+      .filter(a => a.dealId === deal.id && a.type === 'note')
+      .sort((x, y) => {
+        const dx = x.createdAt?.toDate?.()?.getTime?.() ?? new Date(x.createdAt ?? 0).getTime();
+        const dy = y.createdAt?.toDate?.()?.getTime?.() ?? new Date(y.createdAt ?? 0).getTime();
+        return dy - dx;
+      });
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {canEditDeal && (
+          <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="fl">Nova nota / correção</div>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="Contexto, correções ou orientações para quem seguir com o lead..."
+              value={noteText}
+              onChange={e => setNoteText(e.target.value)}
+              style={{ resize: 'vertical' }}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ alignSelf: 'flex-end' }}
+              disabled={savingNote || !noteText.trim()}
+              onClick={handleAddNote}
+            >
+              <Icon name="StickyNote" size={14} />
+              {savingNote ? 'Salvando...' : 'Registrar nota'}
+            </button>
+          </div>
+        )}
+
+        {notes.length === 0 ? (
+          <div className="muted" style={{ textAlign: 'center', padding: '26px 0', fontSize: 13 }}>
+            Nenhuma nota registrada neste lead ainda.
+          </div>
+        ) : (
+          notes.map(n => (
+            <div key={n.id} style={{ display: 'flex', gap: 10, padding: '10px 2px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ width: 30, height: 30, borderRadius: 8, background: '#6B728018', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon name="StickyNote" size={15} color="#6B7280" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{(n as any).text}</div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  {n.userId === user?.uid ? 'Você' : sellerById(sellers, n.userId)?.name ?? 'Time'} · {fmtWhen(n)}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
 
   // ── JSX principal ─────────────────────────────────────────────────────────
 
-  return (
-    <>
-    <div className="overlay" onClick={onClose}>
-      <div className="deal-panel" onClick={e => e.stopPropagation()}>
+  const panelContent = (
+      <div className={`deal-panel ${isPage ? 'deal-page-mode' : ''}`} onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="deal-hd">
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isPage && (
+                <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={onClose} aria-label="Voltar">
+                  <Icon name="ArrowLeft" size={18} />
+                </button>
+              )}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 100, background: prodColor + '18', color: prodColor }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: prodColor }} />
                 {prodLabel}
               </span>
               <span className="badge badge-primary">{stageName}</span>
             </div>
-            <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={onClose} aria-label="Fechar painel">
-              <Icon name="X" size={18} />
-            </button>
+            {!isPage && (
+              <button className="icon-btn" style={{ width: 32, height: 32 }} onClick={onClose} aria-label="Fechar painel">
+                <Icon name="X" size={18} />
+              </button>
+            )}
           </div>
 
           <div className="row" style={{ gap: 8 }}>
-            <h1 className="h1" style={{ flex: 1, lineHeight: 1.2 }}>{deal.name}</h1>
-            <Icon name="Pencil" size={15} color="#9aa3af" style={{ cursor: 'pointer' }} />
+            {canEditDeal && (
+              <button
+                className="icon-btn"
+                style={{ width: 32, height: 32, flexShrink: 0 }}
+                onClick={toggleFavorite}
+                title={deal.isFavorite ? 'Remover dos favoritos' : 'Marcar como lead de grande potencial'}
+                aria-label="Favoritar lead"
+              >
+                <Icon name="Star" size={18} color={deal.isFavorite ? '#F59E0B' : '#C4CBD4'} fill={deal.isFavorite ? '#F59E0B' : 'none'} />
+              </button>
+            )}
+            {!canEditDeal && deal.isFavorite && (
+              <Icon name="Star" size={18} color="#F59E0B" fill="#F59E0B" style={{ flexShrink: 0, alignSelf: 'center' }} />
+            )}
+            {isEditing ? (
+              <input
+                className="input"
+                style={{ flex: 1, fontSize: 15, fontWeight: 700 }}
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                placeholder="Nome do negócio"
+                autoFocus
+              />
+            ) : (
+              <h1 className="h1" style={{ flex: 1, lineHeight: 1.2 }}>{deal.name}</h1>
+            )}
+            {canEditDeal && !isEditing && (
+              <button
+                onClick={openEdit}
+                aria-label="Editar negócio"
+                title="Editar negócio"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex' }}
+              >
+                <Icon name="Pencil" size={15} color="#9aa3af" />
+              </button>
+            )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
-            <div className="money" style={{ color: 'var(--primary)', fontSize: 18 }}>
-              {fmtCurrency(deal.value)}
+          {isEditing ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
+              <div className="field" style={{ margin: 0 }}>
+                <div className="fl">Empresa</div>
+                <input className="input" value={editCompany} onChange={e => setEditCompany(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <div className="fl">Valor (R$)</div>
+                <input className="input" type="number" step="0.01" value={editValue} onChange={e => setEditValue(e.target.value)} />
+              </div>
+              <div className="field" style={{ margin: 0, gridColumn: '1 / -1' }}>
+                <div className="fl">Vencimento</div>
+                <input className="input" value={editDue} onChange={e => setEditDue(e.target.value)} placeholder="Ex.: 20/07" />
+              </div>
             </div>
-            <span className="muted" style={{ fontSize: 12 }}>{deal.company}</span>
-          </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+              <div className="money" style={{ color: 'var(--primary)', fontSize: 18 }}>
+                {fmtCurrency(deal.value)}
+              </div>
+              <span className="muted" style={{ fontSize: 12 }}>{deal.company}</span>
+            </div>
+          )}
+
+          {/* Origem de captação (WizMart Forms) */}
+          {deal.leadOrigin && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+              <span
+                className="badge"
+                title={deal.leadOrigin.pageUrl ? `Página: ${deal.leadOrigin.pageUrl}` : undefined}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: '#E0F2FE', color: '#0369A1', fontSize: 11 }}
+              >
+                <Icon name="Globe" size={11} /> Origem: {deal.leadOrigin.sourceName}
+              </span>
+              {deal.leadOrigin.utm && Object.entries(deal.leadOrigin.utm).map(([k, v]) => (
+                <span key={k} className="badge badge-gray" style={{ fontSize: 10.5 }} title={k}>
+                  {k.replace(/^utm/, '').toLowerCase()}: {v}
+                </span>
+              ))}
+            </div>
+          )}
 
           <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary btn-sm" onClick={() => handleStageChange('won')}>
-              <Icon name="Trophy" size={14} /> Ganhar
-            </button>
-            <button className="btn btn-danger btn-sm" onClick={() => handleStageChange('lost')}>
-              <Icon name="X" size={14} /> Perder
-            </button>
-            <button className="btn btn-outline btn-sm">
-              <Icon name="Pencil" size={14} /> Editar
-            </button>
+            {isEditing ? (
+              <>
+                <button className="btn btn-primary btn-sm" onClick={saveEdit} disabled={savingEdit || !editName.trim() || !editCompany.trim()}>
+                  <Icon name="Check" size={14} /> {savingEdit ? 'Salvando...' : 'Salvar'}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={cancelEdit} disabled={savingEdit}>
+                  <Icon name="X" size={14} /> Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn btn-primary btn-sm" onClick={() => handleStageChange('won')}>
+                  <Icon name="Trophy" size={14} /> Ganhar
+                </button>
+                <button className="btn btn-danger btn-sm" onClick={() => setShowLostReasonModal(true)}>
+                  <Icon name="X" size={14} /> Perder
+                </button>
+                {canEditDeal && (
+                  <button className="btn btn-outline btn-sm" onClick={openEdit}>
+                    <Icon name="Pencil" size={14} /> Editar
+                  </button>
+                )}
+              </>
+            )}
+            {canEditDeal && !deal.standbyActive && deal.status === 'open' && (
+              <button
+                className="btn btn-sm"
+                style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #F59E0B44' }}
+                onClick={() => setShowStandbyModal(true)}
+                title="Gera a régua obrigatória de follow-ups (mín. 5, até 7 dias entre eles)"
+              >
+                <Icon name="PauseCircle" size={14} /> Standby
+              </button>
+            )}
+            {canAssignSdr && (
+              <button
+                className="btn btn-sm"
+                style={{ background: '#F3E8FF', color: '#7C3AED', border: '1px solid #E9D5FF' }}
+                onClick={() => setShowAssignSdrModal(true)}
+                title="Atribui o lead direto a um SDR, sem esperar o motor de cadência das 7h"
+              >
+                <Icon name="UserPlus" size={14} /> Atribuir SDR
+              </button>
+            )}
+            {deal.standbyActive && (
+              <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #F59E0B44', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Icon name="PauseCircle" size={12} /> Em Standby{deal.standbyFollowUps ? ` (${deal.standbyFollowUps} follow-ups)` : ''}
+              </span>
+            )}
             {deal.mainProduct === 'wizmart_minimercado' && (
               <button
                 className="btn btn-sm"
@@ -664,6 +1243,7 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
             ['overview',    'Visão Geral'],
             ['produtos',    'Produtos'],
             ['activities',  'Atividades'],
+            ['notas',       'Notas'],
             ['history',     'Histórico'],
           ] as const).map(([k, l]) => (
             <button
@@ -681,11 +1261,50 @@ export function DealSidebar({ dealId, onClose, onPoints }: DealSidebarProps) {
           {tab === 'overview'   && renderOverview()}
           {tab === 'produtos'   && renderProdutos()}
           {tab === 'activities' && renderActivities()}
+          {tab === 'notas'      && renderNotas()}
           {tab === 'history'    && renderHistory()}
         </div>
 
       </div>
-    </div>
+  );
+
+  return (
+    <>
+    {isPage ? panelContent : (
+      <div className="overlay" onClick={onClose}>
+        {panelContent}
+      </div>
+    )}
+
+    {/* LostReasonModal — motivo estruturado ao marcar como Perdido */}
+    {showLostReasonModal && (
+      <LostReasonModal
+        deal={deal}
+        onClose={() => setShowLostReasonModal(false)}
+        onConfirm={handleConfirmLost}
+      />
+    )}
+
+    {/* StandbyModal — régua obrigatória de follow-ups */}
+    {showStandbyModal && (
+      <StandbyModal
+        deal={deal}
+        onClose={() => setShowStandbyModal(false)}
+        onSuccess={() => onPoints({ pts: 0, custom: '⏸ Standby ativado — follow-ups agendados!' })}
+        onError={msg => onPoints({ pts: 0, custom: `⚠️ ${msg}` })}
+      />
+    )}
+
+    {/* AssignSdrModal — atribuição manual BDR→SDR (Fase D2) */}
+    {showAssignSdrModal && (
+      <AssignSdrModal
+        deal={deal}
+        sdrs={activeSdrs}
+        workloadBySdr={sdrWorkloads}
+        onConfirm={handleAssignSdr}
+        onCancel={() => setShowAssignSdrModal(false)}
+      />
+    )}
 
     {/* ProjectRequestModal — WizMart Minimercado (fora do overlay para z-index correto) */}
     {showProjectModal && (

@@ -123,6 +123,11 @@ a {
   background: transparent;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cdd3da transparent;
+}
+
 /* ===== Typography helpers ===== */
 .h1 {
   font-size: 24px;
@@ -674,6 +679,19 @@ table.tbl tbody tr.alt {
   display: flex;
   flex-direction: column;
   max-height: 100%;
+  position: relative;
+}
+
+.kcol::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22px;
+  background: linear-gradient(to bottom, transparent, #eef1f4 85%);
+  border-radius: 0 0 10px 10px;
+  pointer-events: none;
 }
 
 .kcol-hd {
@@ -716,6 +734,7 @@ table.tbl tbody tr.alt {
   cursor: pointer;
   transition: box-shadow .14s, transform .14s;
   box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  flex-shrink: 0;
 }
 
 .kcard:hover {
@@ -804,6 +823,24 @@ table.tbl tbody tr.alt {
   display: flex;
   flex-direction: column;
   animation: slidein .22s cubic-bezier(.22,1,.36,1);
+}
+
+/* Página inteira do lead (rota /lead/:id) — mesmo conteúdo, sem overlay lateral */
+.deal-panel.deal-page-mode {
+  width: 100%;
+  max-width: 960px;
+  height: auto;
+  min-height: calc(100vh - 120px);
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  animation: fadein .25s ease;
+  overflow: hidden;
+}
+
+@keyframes fadein {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes slidein {

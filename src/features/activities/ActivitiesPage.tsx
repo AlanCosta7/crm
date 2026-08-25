@@ -4,6 +4,7 @@ import type { ActivityFeedItem, Seller } from '../../types/crm';
 import { Av } from '../../components/ui/Av';
 import { Icon } from '../../components/ui/Icon';
 import { sellerById } from '../../utils/crmFormat';
+import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
 import { matchesProductId } from '../../utils/productScope';
 
@@ -14,28 +15,50 @@ const ACT_ICON: Record<string, { i: string; c: string }> = {
   email: { i: 'Mail', c: '#1A6B1A' },
   note: { i: 'StickyNote', c: '#6B7280' },
   call: { i: 'Phone', c: '#F59E0B' },
+  linkedin: { i: 'Linkedin', c: '#0077B5' },
+  visit: { i: 'MapPin', c: '#3B82F6' },
 };
 
-const ACT_FILTERS = ['Todos', 'Email', 'WhatsApp', 'Reunião', 'Ganho', 'Nota'];
+const ACT_FILTERS = ['Todos', 'Ligação', 'LinkedIn', 'WhatsApp', 'Email', 'Reunião', 'Ganho', 'Nota'];
 const ACT_FILTER_MAP: Record<string, string> = {
-  Email: 'email', WhatsApp: 'whatsapp', Reunião: 'meeting', Ganho: 'win', Nota: 'note',
+  'Ligação': 'call', LinkedIn: 'linkedin', Email: 'email', WhatsApp: 'whatsapp', 'Reunião': 'meeting', Ganho: 'win', Nota: 'note',
 };
 
 export function ActivitiesPage() {
   const [filter, setFilter] = useState('Todos');
+  const { user } = useAuthStore();
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
 
-  const { data: activities, loading } = useFirestoreCollection<ActivityFeedItem>('activity');
+  // Coleção real (cadência, standby, handoff, notas) + feed legado v1
+  const { data: legacyFeed, loading } = useFirestoreCollection<ActivityFeedItem>('activity');
+  const { data: realActivities } = useFirestoreCollection<ActivityFeedItem>('activities');
   const { data: sellers } = useFirestoreCollection<Seller>('sellers');
 
   // Cloud Functions gravam `userId`; protótipo antigo usava `who` — suporta ambos
-  const getSellerForActivity = (a: ActivityFeedItem) => {
-    const id = (a as any).userId || a.who || '';
-    return sellerById(sellers, id);
-  };
+  const actorId = (a: ActivityFeedItem) => (a as any).userId || a.who || '';
+  const getSellerForActivity = (a: ActivityFeedItem) => sellerById(sellers, actorId(a));
 
-  const scopedActivities = activities.filter(a => matchesProductId(productScope, a.productId || 'wizmart'));
+  // Merge das duas coleções (dedupe por id)
+  const seen = new Set<string>();
+  const allActivities = [...(realActivities ?? []), ...(legacyFeed ?? [])].filter(a => {
+    const key = a.id ?? Math.random().toString(36);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Cada SDR vê apenas as próprias atividades (Observações do cliente, jul/2026).
+  // Gestão, BDR e demais papéis continuam vendo o time todo.
+  const isSdr = user?.role === 'sdr';
+
+  const scopedActivities = allActivities
+    .filter(a => matchesProductId(productScope, a.productId || 'wizmart'))
+    .filter(a => !isSdr || actorId(a) === user?.uid)
+    .sort((x, y) => {
+      const t = (a: any) => a.createdAt?.toDate?.()?.getTime?.() ?? 0;
+      return t(y) - t(x);
+    });
   const filtered = filter === 'Todos'
     ? scopedActivities
     : scopedActivities.filter(a => a.type === ACT_FILTER_MAP[filter]);
@@ -54,7 +77,9 @@ export function ActivitiesPage() {
         <div>
           <h1 className="h1">Atividades</h1>
           <p className="muted" style={{ marginTop: 2, fontSize: 13 }}>
-            Histórico de todas as interações comerciais do time.
+            {isSdr
+              ? 'Suas atividades: cadência do dia, follow-ups de Standby e registros nos seus leads.'
+              : 'Histórico de todas as interações comerciais do time.'}
           </p>
         </div>
         <span className="badge badge-gray" style={{ height: 28, padding: '0 12px', fontSize: 13 }}>
@@ -100,9 +125,21 @@ export function ActivitiesPage() {
                           <Av initials={s.initials} color={s.color} size={22} />
                         )}
                         <div>
-                          <strong>{s.name}</strong> {a.text}
+                          <strong>{s.name}</strong>{' '}
+                          {a.text ?? (a as any).notes ?? `${(a as any).companyName ? `— ${(a as any).companyName}` : 'atividade registrada'}`}
                           {a.val && (
                             <span style={{ color: 'var(--primary)', fontWeight: 700 }}> {a.val}</span>
+                          )}
+                          {(a as any).cadenceType === 'standby' && (
+                            <span className="badge" style={{ marginLeft: 6, background: '#FEF3C7', color: '#92400E', fontSize: 10 }}>
+                              ⏸ Standby {(a as any).standbyIndex}/{(a as any).standbyTotal}
+                            </span>
+                          )}
+                          {(a as any).status === 'pending' && (
+                            <span className="badge" style={{ marginLeft: 6, background: '#FEF3C7', color: '#B45309', fontSize: 10 }}>Agendada</span>
+                          )}
+                          {(a as any).status === 'overdue' && (
+                            <span className="badge" style={{ marginLeft: 6, background: '#FEE2E2', color: '#B91C1C', fontSize: 10 }}>Atrasada</span>
                           )}
                         </div>
                       </div>

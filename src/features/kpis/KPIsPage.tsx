@@ -42,7 +42,7 @@ function Arc({ pct, size = 120, strokeColor = 'var(--primary)' }: { pct: number;
   );
 }
 
-// Card de Estatística
+// Card de Estatística — versão compacta (sem sub-texto)
 interface StatCardProps {
   label: string;
   value: string;
@@ -54,17 +54,17 @@ interface StatCardProps {
 
 function StatCard({ label, value, sub, trend, icon, themeColor }: StatCardProps) {
   return (
-    <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 6, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: themeColor }} />
+    <div className="card" style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 4, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: themeColor }} />
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <span className="label" style={{ fontSize: 12 }}>{label}</span>
-        <Icon name={icon} size={16} color={themeColor} />
+        <span className="label" style={{ fontSize: 10.5 }}>{label}</span>
+        <Icon name={icon} size={14} color={themeColor} />
       </div>
-      <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: 'var(--text-primary)', margin: '4px 0' }}>
+      <div style={{ fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
         {value}
       </div>
       {sub && (
-        <div className="row" style={{ gap: 6, fontSize: 11.5 }}>
+        <div className="row" style={{ gap: 5, fontSize: 10.5 }}>
           {trend !== undefined && (
             <span style={{ color: trend >= 0 ? 'var(--primary)' : 'var(--danger)', fontWeight: 700 }}>
               {trend >= 0 ? '↑' : '↓'} {Math.abs(trend)}%
@@ -478,372 +478,289 @@ export function KPIsPage() {
 
   // ── Renderização das visualizações de Dashboard ──
 
+  // helpers inline para o leaderboard
+  const sdrTableRows = () => users.filter(u => u.role === 'sdr').map(u => {
+    const goal = userGoals.find(g => g.userId === u.id || g.id === u.id);
+    const dailyGoal = goal?.activitiesPerDay ?? 4;
+    const actsDone = activities.filter(a => a.userId === u.id && a.status === 'completed').length;
+    const meetings = activities.filter(a => a.userId === u.id && a.type === 'meeting').length;
+    const pct = dailyGoal > 0 ? Math.min(100, Math.round((actsDone / dailyGoal) * 100)) : 0;
+    const barColor = pct >= 100 ? '#1A6B1A' : pct >= 60 ? '#D97706' : '#EF4444';
+    return (
+      <tr key={u.id}>
+        <td><div className="row" style={{ gap: 7 }}><Av initials={u.initials} color={u.color} size={22} /><span style={{ fontSize: 12, fontWeight: 600 }}>{u.name.split(' ')[0]}</span></div></td>
+        <td><span style={{ fontWeight: 800, color: barColor, fontSize: 12 }}>{actsDone}</span></td>
+        <td><span className="muted" style={{ fontSize: 11 }}>{dailyGoal}</span></td>
+        <td style={{ minWidth: 70 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ flex: 1, height: 4, background: 'var(--bg-2)', borderRadius: 2 }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 2, transition: 'width .5s' }} />
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{pct}%</span>
+          </div>
+        </td>
+        <td><span style={{ fontSize: 12 }}>{meetings}</span></td>
+      </tr>
+    );
+  });
+
+  const repTableRows = () => users.filter(u => u.role === 'rep').map(u => {
+    const goal = userGoals.find(g => g.userId === u.id || g.id === u.id);
+    const visitGoal = goal?.visitsPerMonth ?? 10;
+    const conquestGoal = goal?.conquestsPerMonth ?? 2;
+    const myDeals = deals.filter(d => d.assignedRepId === u.id || d.owner === u.id);
+    const visits = myDeals.filter(d => (d.cohortKeys as any)?.visitScheduledMonth).length;
+    const pdvs = myDeals.filter(d => d.status === 'won').reduce((s, d) => s + ((d as any).conquestValue ?? 1), 0);
+    const vPct = visitGoal > 0 ? Math.min(100, Math.round((visits / visitGoal) * 100)) : 0;
+    const pPct = conquestGoal > 0 ? Math.min(100, Math.round((pdvs / conquestGoal) * 100)) : 0;
+    return (
+      <tr key={u.id}>
+        <td><div className="row" style={{ gap: 7 }}><Av initials={u.initials} color={u.color} size={22} /><span style={{ fontSize: 12, fontWeight: 600 }}>{u.name.split(' ')[0]}</span></div></td>
+        <td><span style={{ fontWeight: 800, color: vPct >= 100 ? '#1A6B1A' : 'var(--text-1)', fontSize: 12 }}>{visits}</span></td>
+        <td>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ flex: 1, height: 4, background: 'var(--bg-2)', borderRadius: 2, minWidth: 36 }}>
+              <div style={{ height: '100%', width: `${vPct}%`, background: vPct >= 100 ? '#1A6B1A' : '#3B82F6', borderRadius: 2, transition: 'width .5s' }} />
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{vPct}%</span>
+          </div>
+        </td>
+        <td><span style={{ fontWeight: 800, color: pPct >= 100 ? '#1A6B1A' : 'var(--text-1)', fontSize: 12 }}>{pdvs} PDVs</span></td>
+        <td>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ flex: 1, height: 4, background: 'var(--bg-2)', borderRadius: 2, minWidth: 36 }}>
+              <div style={{ height: '100%', width: `${pPct}%`, background: pPct >= 100 ? '#1A6B1A' : '#8B5CF6', borderRadius: 2, transition: 'width .5s' }} />
+            </div>
+            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{pPct}%</span>
+          </div>
+        </td>
+      </tr>
+    );
+  });
+
   // 1. Visão consolidada da Gestão
-  const renderGestaoDashboard = () => (
+  const renderGestaoDashboard = () => {
+    // Mapa de visitas por estado
+    const visitsByState: Record<string, number> = {};
+    deals
+      .filter(d => ['visita_agendada', 'degustacao_agendada', 'degustacao_realizada'].includes(d.stage) || (d.cohortKeys as any)?.visitScheduledMonth)
+      .filter(d => productFilter === 'all' || d.productId === productFilter)
+      .forEach(d => {
+        const uf = (d as any).uf ?? d.location?.state;
+        if (uf) visitsByState[uf] = (visitsByState[uf] ?? 0) + 1;
+      });
+    const totalVisits = Object.values(visitsByState).reduce((a, b) => a + b, 0);
+
+    return (
     <>
-      {/* 8 Cards Comerciais */}
-      <div className="grid-cols-4-responsive">
-        <StatCard label="Negócios Criados" value={String(kpis.dealsCreated)} sub="novos leads na fila" icon="Briefcase" themeColor={currentThemeColor} />
-        <StatCard label="Faturamento Conquistado" value={fmtCurrencyCompact(kpis.revenue)} sub="milestone do período" icon="Trophy" themeColor="#F59E0B" />
-        <StatCard label="Negócios Ganhos" value={String(kpis.dealsWon)} sub="PDVs ativos" icon="CheckCircle" themeColor="var(--primary)" />
-        <StatCard label="Taxa de Conversão" value={`${kpis.conversionRate}%`} sub="win rate médio" icon="TrendingUp" themeColor="#8B5CF6" />
+      {/* ── Linha 1: 8 cards em 1 linha ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 10 }}>
+        <StatCard label="Negócios Criados"    value={String(kpis.dealsCreated)}                        sub="novos leads"          icon="Briefcase"   themeColor={currentThemeColor} />
+        <StatCard label="Faturamento"          value={fmtCurrencyCompact(kpis.revenue)}                sub="conquistado"          icon="Trophy"       themeColor="#F59E0B" />
+        <StatCard label="Negócios Ganhos"      value={String(kpis.dealsWon)}                           sub="PDVs ativos"          icon="CheckCircle"  themeColor="var(--primary)" />
+        <StatCard label="Conversão"            value={`${kpis.conversionRate}%`}                       sub="win rate"             icon="TrendingUp"   themeColor="#8B5CF6" />
+        <StatCard label="Ticket Médio"         value={fmtCurrencyCompact(kpis.ticket)}                 sub="por fechamento"       icon="DollarSign"   themeColor="#10B981" />
+        <StatCard label="Ciclo de Venda"       value="21 dias"                                         sub="prospecção → fecho"   icon="Clock"        themeColor="#6B7280" />
+        <StatCard label="Moedas"               value={`${kpis.coins} 🪙`}                             sub="distribuídas"         icon="Coins"        themeColor="#D97706" />
+        <StatCard label="Tarefas"              value={`${kpis.activitiesCompleted}/${kpis.activities}`} sub={`${kpis.cadenceRate}% ok`} icon="CheckSquare" themeColor="#0E7490" />
       </div>
 
-      <div className="grid-cols-4-responsive">
-        <StatCard label="Ticket Médio" value={fmtCurrencyCompact(kpis.ticket)} sub="por fechamento" icon="DollarSign" themeColor="#10B981" />
-        <StatCard label="Ciclo Médio de Venda" value="21 dias" sub="prospecção → fecho" icon="Clock" themeColor="#6B7280" />
-        <StatCard label="Moedas Distribuídas" value={`${kpis.coins} 🪙`} sub="saldo gamificado" icon="Coins" themeColor="#D97706" />
-        <StatCard label="Tarefas Concluídas" value={`${kpis.activitiesCompleted} / ${kpis.activities}`} sub={`${kpis.cadenceRate}% conclusão`} icon="CheckSquare" themeColor="#0E7490" />
-      </div>
+      {/* ── Linha 2: Mapa região + Funil (scroll) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
 
-      {/* Gráficos Principais */}
-      <div className="grid-cols-split-responsive">
-        
-        {/* Mapa Interativo e Evolução de Faturamento */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Mapa SVG de Regiões */}
+        {/* Coluna esquerda: mapa de regiões + faturamento comparativo */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="card">
             <div className="card-hd" style={{ justifyContent: 'space-between' }}>
               <div className="row" style={{ gap: 8 }}>
-                <Icon name="Map" size={16} color="var(--primary)" />
-                <h3 style={{ fontSize: 14 }}>Mapa de Vendas por Região</h3>
+                <Icon name="Map" size={15} color="var(--primary)" />
+                <h3 style={{ fontSize: 13.5 }}>Vendas por Região</h3>
               </div>
               {regionFilter !== 'all' && (
                 <button className="btn btn-outline btn-sm" onClick={() => setRegionFilter('all')}>
-                  <Icon name="RefreshCw" size={12} /> Limpar Filtro
+                  <Icon name="RefreshCw" size={11} /> Limpar
                 </button>
               )}
             </div>
-            <div className="card-pad" style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 16, alignItems: 'center', background: '#fff' }}>
-              <svg viewBox="0 0 360 270" style={{ width: '100%', height: 210 }}>
-                {/* Linhas de conexão */}
-                <line x1="90" y1="50" x2="170" y2="110" stroke="rgba(0,0,0,0.08)" strokeWidth={1.5} />
-                <line x1="280" y1="70" x2="170" y2="110" stroke="rgba(0,0,0,0.08)" strokeWidth={1.5} />
-                <line x1="220" y1="150" x2="170" y2="110" stroke="rgba(0,0,0,0.08)" strokeWidth={1.5} />
-                <line x1="220" y1="150" x2="170" y2="220" stroke="rgba(0,0,0,0.08)" strokeWidth={1.5} />
-
+            <div className="card-pad" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12, alignItems: 'center' }}>
+              <svg viewBox="0 0 360 270" style={{ width: '100%', height: 180 }}>
+                <line x1="90" y1="50" x2="170" y2="110" stroke="rgba(0,0,0,0.07)" strokeWidth={1.5} />
+                <line x1="280" y1="70" x2="170" y2="110" stroke="rgba(0,0,0,0.07)" strokeWidth={1.5} />
+                <line x1="220" y1="150" x2="170" y2="110" stroke="rgba(0,0,0,0.07)" strokeWidth={1.5} />
+                <line x1="220" y1="150" x2="170" y2="220" stroke="rgba(0,0,0,0.07)" strokeWidth={1.5} />
                 {regionBubbleCounts.map(reg => {
                   const isSelected = regionFilter === reg.id;
                   const bubbleSize = reg.count > 0 ? reg.r + Math.min(reg.count * 4, 15) : 12;
                   return (
                     <g key={reg.id} style={{ cursor: 'pointer' }} onClick={() => setRegionFilter(isSelected ? 'all' : reg.id)}>
-                      <circle
-                        cx={reg.x}
-                        cy={reg.y}
-                        r={bubbleSize}
-                        fill={reg.color}
-                        fillOpacity={isSelected ? 0.35 : 0.15}
-                        stroke={reg.color}
-                        strokeWidth={isSelected ? 3 : 1.5}
-                        style={{ transition: 'all 0.3s' }}
-                      />
+                      <circle cx={reg.x} cy={reg.y} r={bubbleSize} fill={reg.color} fillOpacity={isSelected ? 0.35 : 0.15} stroke={reg.color} strokeWidth={isSelected ? 3 : 1.5} style={{ transition: 'all 0.3s' }} />
                       <circle cx={reg.x} cy={reg.y} r={4} fill={reg.color} />
-                      <text
-                        x={reg.x}
-                        y={reg.y - bubbleSize - 6}
-                        textAnchor="middle"
-                        style={{ fontSize: 10, fontWeight: 700, fill: 'var(--text-1)' }}
-                      >
-                        {reg.name}
-                      </text>
-                      <text
-                        x={reg.x}
-                        y={reg.y + 4}
-                        textAnchor="middle"
-                        style={{ fontSize: 10, fontWeight: 800, fill: reg.color }}
-                      >
-                        {reg.count}
-                      </text>
+                      <text x={reg.x} y={reg.y - bubbleSize - 5} textAnchor="middle" style={{ fontSize: 9, fontWeight: 700, fill: 'var(--text-1)' }}>{reg.name}</text>
+                      <text x={reg.x} y={reg.y + 4} textAnchor="middle" style={{ fontSize: 9, fontWeight: 800, fill: reg.color }}>{reg.count}</text>
                     </g>
                   );
                 })}
               </svg>
               <div>
-                <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 8, color: 'var(--text-1)' }}>Cidades Principais</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontWeight: 700, fontSize: 11.5, marginBottom: 6, color: 'var(--text-1)' }}>Cidades Principais</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {Object.entries(kpis.cityCounts).slice(0, 4).map(([city, count]) => (
-                    <div key={city} className="row" style={{ justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
-                      <span className="font-semibold">{city}</span>
-                      <span style={{ color: currentThemeColor, fontWeight: 800 }}>{count} deals</span>
+                    <div key={city} className="row" style={{ justifyContent: 'space-between', fontSize: 11.5, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontWeight: 600 }}>{city}</span>
+                      <span style={{ color: currentThemeColor, fontWeight: 800 }}>{count}</span>
                     </div>
                   ))}
-                  {Object.keys(kpis.cityCounts).length === 0 && (
-                    <span className="muted" style={{ fontSize: 12 }}>Nenhuma visita regional no período.</span>
-                  )}
+                  {Object.keys(kpis.cityCounts).length === 0 && <span className="muted" style={{ fontSize: 11 }}>Sem dados no período.</span>}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Gráfico de Faturamento Comparativo */}
-          <div className="card">
-            <div className="card-hd">
-              <h3 style={{ fontSize: 14 }}>Comparação de Faturamento WizMart vs Smart Café</h3>
+          {/* Faturamento comparativo compacto */}
+          <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <h3 style={{ fontSize: 13, fontWeight: 700 }}>WizMart vs Smart Café</h3>
             </div>
-            <div className="card-pad" style={{ background: '#fff', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div className="row" style={{ gap: 18 }}>
-                <div style={{ flex: 1 }}>
-                  <div className="row" style={{ gap: 6, marginBottom: 4 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: PRODUCT_COLOR.wizmart.primary }} />
-                    <span style={{ fontSize: 12, fontWeight: 600 }} className="muted">WizMart</span>
-                  </div>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>{fmtCurrency(filteredRevenue('wizmart'))}</div>
+            <div className="row" style={{ gap: 18 }}>
+              <div style={{ flex: 1 }}>
+                <div className="row" style={{ gap: 5, marginBottom: 3 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: PRODUCT_COLOR.wizmart.primary }} />
+                  <span style={{ fontSize: 11, fontWeight: 600 }} className="muted">WizMart</span>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div className="row" style={{ gap: 6, marginBottom: 4 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: PRODUCT_COLOR.smart_cafe.primary }} />
-                    <span style={{ fontSize: 12, fontWeight: 600 }} className="muted">Smart Café</span>
-                  </div>
-                  <div style={{ fontSize: 18, fontWeight: 800 }}>{fmtCurrency(filteredRevenue('smart_cafe'))}</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{fmtCurrency(filteredRevenue('wizmart'))}</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="row" style={{ gap: 5, marginBottom: 3 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: PRODUCT_COLOR.smart_cafe.primary }} />
+                  <span style={{ fontSize: 11, fontWeight: 600 }} className="muted">Smart Café</span>
                 </div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{fmtCurrency(filteredRevenue('smart_cafe'))}</div>
               </div>
-              <div style={{ height: 14, borderRadius: 7, background: '#f1f3f5', overflow: 'hidden', display: 'flex' }}>
-                {revenueRatio().wiz > 0 && (
-                  <div style={{ width: `${revenueRatio().wiz}%`, height: '100%', background: PRODUCT_COLOR.wizmart.primary, transition: 'width 0.4s' }} />
-                )}
-                {revenueRatio().cafe > 0 && (
-                  <div style={{ width: `${revenueRatio().cafe}%`, height: '100%', background: PRODUCT_COLOR.smart_cafe.primary, transition: 'width 0.4s' }} />
-                )}
-              </div>
+            </div>
+            <div style={{ height: 10, borderRadius: 5, background: '#f1f3f5', overflow: 'hidden', display: 'flex' }}>
+              {revenueRatio().wiz > 0 && <div style={{ width: `${revenueRatio().wiz}%`, height: '100%', background: PRODUCT_COLOR.wizmart.primary, transition: 'width 0.4s' }} />}
+              {revenueRatio().cafe > 0 && <div style={{ width: `${revenueRatio().cafe}%`, height: '100%', background: PRODUCT_COLOR.smart_cafe.primary, transition: 'width 0.4s' }} />}
             </div>
           </div>
         </div>
 
-        {/* Funil de Conversão Dinâmico */}
-        <div className="card">
+        {/* Coluna direita: funil com scroll interno */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-hd">
-            <h3 style={{ fontSize: 14 }}>Funis de Conversão ({funnelData.length} funis ativos)</h3>
+            <h3 style={{ fontSize: 13.5 }}>Funis de Conversão <span className="badge badge-gray" style={{ fontSize: 10 }}>{funnelData.length} ativos</span></h3>
           </div>
-          <div className="card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 20, background: '#fff', height: '100%', justifyContent: 'center' }}>
+          <div style={{ overflowY: 'auto', maxHeight: 380, padding: '8px 16px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
             {funnelData.map(funnel => (
-              <div key={funnel.id} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 12.5, color: funnel.color, borderLeft: `3px solid ${funnel.color}`, paddingLeft: 8 }}>
+              <div key={funnel.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontWeight: 700, fontSize: 11.5, color: funnel.color, borderLeft: `3px solid ${funnel.color}`, paddingLeft: 7 }}>
                   {funnel.name}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {funnel.stages.map((st, i) => (
-                    <div key={i} className="row" style={{ gap: 12 }}>
-                      <span style={{ width: 100, fontSize: 11.5, color: 'var(--text-2)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={st.name}>
-                        {st.name}
+                {funnel.stages.map((st, i) => (
+                  <div key={i} className="row" style={{ gap: 10 }}>
+                    <span style={{ width: 90, fontSize: 10.5, color: 'var(--text-2)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }} title={st.name}>
+                      {st.name}
+                    </span>
+                    <div style={{ flex: 1, height: 16, background: '#f1f3f5', borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
+                      <div style={{ width: `${st.pct}%`, height: '100%', background: `linear-gradient(90deg, ${funnel.color}, ${funnel.color}88)`, borderRadius: 3, transition: 'width 0.4s ease' }} />
+                      <span style={{ position: 'absolute', right: 6, top: 1, fontSize: 9.5, fontWeight: 800, color: st.pct > 50 ? '#fff' : 'var(--text-2)' }}>
+                        {st.count} ({st.pct}%)
                       </span>
-                      <div style={{ flex: 1, height: 20, background: '#f1f3f5', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
-                        <div
-                          style={{
-                            width: `${st.pct}%`,
-                            height: '100%',
-                            background: `linear-gradient(90deg, ${funnel.color}, ${funnel.color}88)`,
-                            borderRadius: 4,
-                            transition: 'width 0.4s ease'
-                          }}
-                        />
-                        <span style={{ position: 'absolute', right: 8, top: 2, fontSize: 10, fontWeight: 800, color: st.pct > 50 ? '#fff' : 'var(--text-2)' }}>
-                          {st.count} ({st.pct}%)
-                        </span>
-                      </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             ))}
-            {funnelData.length === 0 && (
-              <div className="muted text-center py-6" style={{ fontSize: 12 }}>Nenhum funil configurado.</div>
-            )}
+            {funnelData.length === 0 && <div className="muted" style={{ fontSize: 12, textAlign: 'center', padding: '20px 0' }}>Nenhum funil configurado.</div>}
           </div>
         </div>
-
       </div>
 
-      {/* ── SDR/Rep Comparativo com Metas ─────────────────────────────────── */}
+      {/* ── Linha 3: SDR + Rep + Mapa Brasil lado a lado ── */}
       {isManagement && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
 
-          {/* SDR — Atividades do Dia vs. Meta */}
           <div className="card">
-            <div className="card-hd">
-              <h3 style={{ fontSize: 14 }}>SDRs — Atividades vs. Meta</h3>
-            </div>
+            <div className="card-hd"><h3 style={{ fontSize: 13.5 }}>SDRs — Atividades vs. Meta</h3></div>
             <table className="tbl">
-              <thead>
-                <tr>{['SDR','Feitas','Meta/dia','%','Reuniões'].map(h => <th key={h} style={{ fontSize: 11 }}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {users
-                  .filter(u => u.role === 'sdr')
-                  .map(u => {
-                    const goal = userGoals.find(g => g.userId === u.id || g.id === u.id);
-                    const dailyGoal = goal?.activitiesPerDay ?? 4;
-                    const actsDone = activities.filter(a => a.userId === u.id && a.status === 'completed').length;
-                    const meetings = activities.filter(a => a.userId === u.id && a.type === 'meeting').length;
-                    const pct = dailyGoal > 0 ? Math.min(100, Math.round((actsDone / dailyGoal) * 100)) : 0;
-                    const barColor = pct >= 100 ? '#1A6B1A' : pct >= 60 ? '#D97706' : '#EF4444';
-                    return (
-                      <tr key={u.id}>
-                        <td>
-                          <div className="row" style={{ gap: 7 }}>
-                            <Av initials={u.initials} color={u.color} size={24} />
-                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{u.name.split(' ')[0]}</span>
-                          </div>
-                        </td>
-                        <td><span style={{ fontWeight: 800, color: barColor }}>{actsDone}</span></td>
-                        <td><span className="muted" style={{ fontSize: 12 }}>{dailyGoal}</span></td>
-                        <td style={{ minWidth: 80 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ flex: 1, height: 5, background: 'var(--bg-2)', borderRadius: 3 }}>
-                              <div style={{ height: '100%', width: `${pct}%`, background: barColor, borderRadius: 3, transition: 'width .5s' }} />
-                            </div>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-2)' }}>{pct}%</span>
-                          </div>
-                        </td>
-                        <td><span style={{ fontSize: 12.5 }}>{meetings}</span></td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
+              <thead><tr>{['SDR','Feitas','Meta/dia','%','Reun.'].map(h => <th key={h} style={{ fontSize: 10.5 }}>{h}</th>)}</tr></thead>
+              <tbody>{sdrTableRows()}</tbody>
             </table>
           </div>
 
-          {/* Rep — Visitas e Conquistas vs. Meta */}
           <div className="card">
-            <div className="card-hd">
-              <h3 style={{ fontSize: 14 }}>Reps — Visitas e PDVs vs. Meta</h3>
-            </div>
+            <div className="card-hd"><h3 style={{ fontSize: 13.5 }}>Reps — Visitas e PDVs vs. Meta</h3></div>
             <table className="tbl">
-              <thead>
-                <tr>{['Rep','Visitas','Meta V.','PDVs','Meta PDV'].map(h => <th key={h} style={{ fontSize: 11 }}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {users
-                  .filter(u => u.role === 'rep')
-                  .map(u => {
-                    const goal = userGoals.find(g => g.userId === u.id || g.id === u.id);
-                    const visitGoal = goal?.visitsPerMonth ?? 10;
-                    const conquestGoal = goal?.conquestsPerMonth ?? 2;
-                    const myDeals = deals.filter(d => d.assignedRepId === u.id || d.owner === u.id);
-                    const visits = myDeals.filter(d => (d.cohortKeys as any)?.visitScheduledMonth).length;
-                    const pdvs = myDeals.filter(d => d.status === 'won').reduce((s, d) => s + ((d as any).conquestValue ?? 1), 0);
-                    const vPct = visitGoal > 0 ? Math.min(100, Math.round((visits / visitGoal) * 100)) : 0;
-                    const pPct = conquestGoal > 0 ? Math.min(100, Math.round((pdvs / conquestGoal) * 100)) : 0;
-                    return (
-                      <tr key={u.id}>
-                        <td>
-                          <div className="row" style={{ gap: 7 }}>
-                            <Av initials={u.initials} color={u.color} size={24} />
-                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>{u.name.split(' ')[0]}</span>
-                          </div>
-                        </td>
-                        <td><span style={{ fontWeight: 800, color: vPct >= 100 ? '#1A6B1A' : 'var(--text-1)' }}>{visits}</span></td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ flex: 1, height: 5, background: 'var(--bg-2)', borderRadius: 3, minWidth: 40 }}>
-                              <div style={{ height: '100%', width: `${vPct}%`, background: vPct >= 100 ? '#1A6B1A' : '#3B82F6', borderRadius: 3, transition: 'width .5s' }} />
-                            </div>
-                            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{vPct}%</span>
-                          </div>
-                        </td>
-                        <td><span style={{ fontWeight: 800, color: pPct >= 100 ? '#1A6B1A' : 'var(--text-1)' }}>{pdvs} PDVs</span></td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ flex: 1, height: 5, background: 'var(--bg-2)', borderRadius: 3, minWidth: 40 }}>
-                              <div style={{ height: '100%', width: `${pPct}%`, background: pPct >= 100 ? '#1A6B1A' : '#8B5CF6', borderRadius: 3, transition: 'width .5s' }} />
-                            </div>
-                            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{pPct}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
+              <thead><tr>{['Rep','Visitas','Meta V.','PDVs','Meta PDV'].map(h => <th key={h} style={{ fontSize: 10.5 }}>{h}</th>)}</tr></thead>
+              <tbody>{repTableRows()}</tbody>
             </table>
           </div>
+
+          {totalVisits > 0 ? (
+            <div className="card">
+              <div className="card-hd" style={{ justifyContent: 'space-between' }}>
+                <h3 style={{ fontSize: 13.5 }}>Mapa de Visitas</h3>
+                <span className="badge badge-gray">{totalVisits} visitas</span>
+              </div>
+              <div style={{ padding: '4px 12px 12px' }}>
+                <BrazilMapSVG visitsByState={visitsByState} height={220} />
+              </div>
+            </div>
+          ) : (
+            <div className="card">
+              <div className="card-hd"><h3 style={{ fontSize: 13.5 }}>Mapa de Visitas</h3></div>
+              <div style={{ padding: '24px 16px', textAlign: 'center' }} className="muted">
+                <Icon name="MapPin" size={28} color="var(--border)" style={{ margin: '0 auto 8px' }} />
+                <div style={{ fontSize: 12 }}>Nenhuma visita no período</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Mapa de Visitas por Estado ─────────────────────────────────────── */}
-      {isManagement && (() => {
-        const visitsByState: Record<string, number> = {};
-        deals
-          .filter(d => ['visita_agendada', 'degustacao_agendada', 'degustacao_realizada'].includes(d.stage) || (d.cohortKeys as any)?.visitScheduledMonth)
-          .filter(d => productFilter === 'all' || d.productId === productFilter)
-          .forEach(d => {
-            const uf = (d as any).uf ?? d.location?.state;
-            if (uf) visitsByState[uf] = (visitsByState[uf] ?? 0) + 1;
-          });
-        const hasVisits = Object.keys(visitsByState).length > 0;
-        return hasVisits ? (
-          <div className="card">
-            <div className="card-hd">
-              <h3 style={{ fontSize: 14 }}>Mapa de Visitas por Estado</h3>
-              <span className="badge badge-gray">{Object.values(visitsByState).reduce((a,b)=>a+b,0)} visitas</span>
-            </div>
-            <div style={{ padding: '8px 16px 16px', maxWidth: 480 }}>
-              <BrazilMapSVG visitsByState={visitsByState} height={300} />
-            </div>
-          </div>
-        ) : null;
-      })()}
-
-      {/* Leaderboard Duplo do Time */}
-      <div className="grid-cols-2-responsive">
-        {/* Ranking de Pontos */}
+      {/* ── Linha 4: Leaderboards lado a lado ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div className="card">
           <div className="card-hd">
-            <h3 style={{ fontSize: 14 }} className="row">
-              <Icon name="Zap" size={15} color="#FFE08A" /> Ranking Geral de Pontos
-            </h3>
+            <h3 style={{ fontSize: 13.5 }} className="row"><Icon name="Zap" size={14} color="#FFE08A" /> Ranking Geral de Pontos</h3>
           </div>
           <table className="tbl">
-            <thead>
-              <tr>
-                {['Membro', 'Streak', 'Pontos Totais'].map(h => <th key={h}>{h}</th>)}
-              </tr>
-            </thead>
+            <thead><tr>{['Membro','Streak','Pontos'].map(h => <th key={h}>{h}</th>)}</tr></thead>
             <tbody>
-              {users.filter(u => u.role !== 'viewer').sort((a,b) => (b.points || 0) - (a.points || 0)).slice(0, 4).map((u, i) => (
-                <tr key={u.id} className={i % 2 ? 'alt' : ''}>
+              {users.filter(u => u.role !== 'viewer').sort((a,b) => (b.points||0)-(a.points||0)).slice(0,5).map((u,i) => (
+                <tr key={u.id} className={i%2?'alt':''}>
                   <td>
-                    <div className="row" style={{ gap: 8 }}>
-                      <Av initials={u.initials} color={u.color} size={24} />
-                      <span style={{ fontWeight: 600, fontSize: 12.5 }}>{u.name}</span>
-                      <span className="badge badge-gray" style={{ fontSize: 9 }}>{ROLE_LABEL[u.role]}</span>
+                    <div className="row" style={{ gap: 7 }}>
+                      <Av initials={u.initials} color={u.color} size={22} />
+                      <span style={{ fontWeight: 600, fontSize: 12 }}>{u.name}</span>
+                      <span className="badge badge-gray" style={{ fontSize: 8.5 }}>{ROLE_LABEL[u.role]}</span>
                     </div>
                   </td>
-                  <td className="muted tnum" style={{ fontSize: 12 }}>🔥 {u.streak || 0} dias</td>
-                  <td style={{ color: 'var(--primary)', fontWeight: 800, fontSize: 13.5 }}>
-                    {(u.points || 0).toLocaleString('pt-BR')} pts
-                  </td>
+                  <td className="muted" style={{ fontSize: 11.5 }}>🔥 {u.streak||0}d</td>
+                  <td style={{ color: 'var(--primary)', fontWeight: 800, fontSize: 13 }}>{(u.points||0).toLocaleString('pt-BR')} pts</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        {/* Ranking de Moedas */}
         <div className="card">
           <div className="card-hd">
-            <h3 style={{ fontSize: 14 }} className="row">
-              <Icon name="Coins" size={15} color="#D97706" /> Ranking de Moedas do Ciclo
-            </h3>
+            <h3 style={{ fontSize: 13.5 }} className="row"><Icon name="Coins" size={14} color="#D97706" /> Ranking de Moedas do Ciclo</h3>
           </div>
           <table className="tbl">
-            <thead>
-              <tr>
-                {['Membro', 'Nível', 'Moedas no Ciclo'].map(h => <th key={h}>{h}</th>)}
-              </tr>
-            </thead>
+            <thead><tr>{['Membro','Nível','Moedas'].map(h => <th key={h}>{h}</th>)}</tr></thead>
             <tbody>
-              {users.filter(u => u.role !== 'viewer').sort((a,b) => (b.coinBalance || 0) - (a.coinBalance || 0)).slice(0, 4).map((u, i) => (
-                <tr key={u.id} className={i % 2 ? 'alt' : ''}>
+              {users.filter(u => u.role !== 'viewer').sort((a,b) => (b.coinBalance||0)-(a.coinBalance||0)).slice(0,5).map((u,i) => (
+                <tr key={u.id} className={i%2?'alt':''}>
                   <td>
-                    <div className="row" style={{ gap: 8 }}>
-                      <Av initials={u.initials} color={u.color} size={24} />
-                      <span style={{ fontWeight: 600, fontSize: 12.5 }}>{u.name}</span>
-                      <span className="badge badge-gray" style={{ fontSize: 9 }}>{ROLE_LABEL[u.role]}</span>
+                    <div className="row" style={{ gap: 7 }}>
+                      <Av initials={u.initials} color={u.color} size={22} />
+                      <span style={{ fontWeight: 600, fontSize: 12 }}>{u.name}</span>
+                      <span className="badge badge-gray" style={{ fontSize: 8.5 }}>{ROLE_LABEL[u.role]}</span>
                     </div>
                   </td>
-                  <td className="muted" style={{ fontSize: 12 }}>Nível {u.level || 1}</td>
-                  <td style={{ color: '#D97706', fontWeight: 800, fontSize: 13.5 }}>
-                    {u.coinBalance || 0} 🪙
-                  </td>
+                  <td className="muted" style={{ fontSize: 11.5 }}>Nível {u.level||1}</td>
+                  <td style={{ color: '#D97706', fontWeight: 800, fontSize: 13 }}>{u.coinBalance||0} 🪙</td>
                 </tr>
               ))}
             </tbody>
@@ -851,7 +768,8 @@ export function KPIsPage() {
         </div>
       </div>
     </>
-  );
+    );
+  };
 
   // Helper para faturamento comparativo
   const filteredRevenue = (prod: 'wizmart' | 'smart_cafe') => {

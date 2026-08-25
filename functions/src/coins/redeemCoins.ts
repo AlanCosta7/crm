@@ -20,13 +20,15 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 
+const REGION = "southamerica-east1";
+
 function getCurrentCycle(): string {
   const d = new Date();
   const quarter = Math.ceil((d.getMonth() + 1) / 3);
   return `Q${quarter}-${d.getFullYear()}`;
 }
 
-export const redeemCoins = onCall(async (request) => {
+export const redeemCoins = onCall({ region: REGION }, async (request) => {
   const { prizeId, tenantId, deliveryInfo } = request.data as {
     prizeId:      string;
     tenantId:     string;

@@ -12,6 +12,7 @@ export const tvDataRefresher = onSchedule(
     schedule: "*/5 * * * *",
     timeZone: "America/Sao_Paulo",
     memory: "256MiB",
+    region: "southamerica-east1",
   },
   async () => {
     const db = admin.firestore();

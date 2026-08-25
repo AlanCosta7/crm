@@ -47,7 +47,9 @@ function encodeHeader(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, "utf-8").toString("base64")}?=`;
 }
 
-export const sendEmail = onCall({ region: REGION }, async (request) => {
+export const sendEmail = onCall(
+  { region: REGION, secrets: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"] },
+  async (request) => {
   const { tenantId, to, subject, body, fromName } = (request.data || {}) as SendEmailData;
   const uid = request.auth?.uid;
 

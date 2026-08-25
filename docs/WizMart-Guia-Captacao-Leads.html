@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WizMart CRM · Guia de Captação de Leads</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --accent-text:#415400; --accent-light:#F3F8DC;
+    --danger:#DC2626; --danger-light:#FEE2E2;
+    --info:#0369A1; --info-light:#E0F2FE;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --text-3:#9CA3AF; --border:#E5E7EB;
+    --radius:14px; --shadow:0 1px 3px rgba(17,25,40,.06),0 8px 24px rgba(17,25,40,.05);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif;
+    color:var(--text); background:var(--bg); line-height:1.6; font-size:16px;
+  }
+  h1,h2,h3,h4{font-family:'Sora','Inter',sans-serif; line-height:1.25; color:var(--text); margin:0;}
+  .wrap{max-width:860px; margin:0 auto; padding:0 28px;}
+
+  /* ── Capa ── */
+  .cover{
+    background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%);
+    color:#fff; padding:96px 28px 84px; text-align:center; position:relative; overflow:hidden;
+  }
+  .cover::after{content:""; position:absolute; right:-80px; bottom:-80px; width:320px; height:320px;
+    background:radial-gradient(circle, rgba(141,182,0,.35), transparent 70%); border-radius:50%;}
+  .brand{display:inline-flex; align-items:center; gap:14px; margin-bottom:30px;}
+  .brand .logo{width:60px; height:60px; border-radius:16px; background:#fff;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .brand .name{font-family:'Sora'; font-weight:800; font-size:32px; letter-spacing:-.5px;}
+  .brand .name b{color:#D6F5C9;}
+  .cover h1{color:#fff; font-size:40px; font-weight:800; letter-spacing:-1px; margin:8px 0 14px; position:relative; z-index:1;}
+  .cover .sub{font-size:18px; color:#D6F5C9; font-weight:500; position:relative; z-index:1;}
+  .cover .pill{display:inline-block; margin-top:28px; background:rgba(255,255,255,.14);
+    border:1px solid rgba(255,255,255,.25); padding:8px 18px; border-radius:100px; font-size:14px; font-weight:600;
+    position:relative; z-index:1; backdrop-filter:blur(6px);}
+
+  /* ── Conteúdo ── */
+  section{padding:46px 0 8px;}
+  h2{font-size:27px; color:var(--primary); font-weight:800; margin-bottom:6px; padding-top:18px;}
+  h2 .num{display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; margin-right:12px;
+    background:var(--primary); color:#fff; border-radius:11px; font-size:18px; vertical-align:middle;}
+  h3{font-size:20px; margin:30px 0 10px; color:var(--text);}
+  h3::before{content:""; display:inline-block; width:8px; height:20px; background:var(--accent);
+    border-radius:3px; margin-right:10px; vertical-align:-3px;}
+  p{margin:10px 0; color:var(--text-2);}
+  strong{color:var(--text);}
+  a{color:var(--primary);}
+
+  .lead{font-size:18px; color:var(--text-2);}
+  .divider{height:1px; background:var(--border); margin:36px 0;}
+
+  /* Passos numerados */
+  ol.steps{list-style:none; counter-reset:s; padding:0; margin:18px 0;}
+  ol.steps>li{counter-increment:s; position:relative; padding:14px 0 14px 56px; border-bottom:1px dashed var(--border);}
+  ol.steps>li:last-child{border-bottom:none;}
+  ol.steps>li::before{content:counter(s); position:absolute; left:0; top:12px; width:36px; height:36px;
+    background:var(--primary-light); color:var(--primary); font-weight:700; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:15px; border:2px solid #fff;
+    box-shadow:0 0 0 1px var(--primary);}
+  ol.steps>li b{color:var(--text);}
+
+  ul.clean{margin:10px 0; padding-left:22px;}
+  ul.clean li{margin:6px 0; color:var(--text-2);}
+
+  /* Caixas (callouts) */
+  .box{border-radius:var(--radius); padding:18px 20px; margin:22px 0; border:1px solid; position:relative;}
+  .box .tag{font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.6px; display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .box p{margin:6px 0;}
+  .box.rule{background:var(--primary-light); border-color:#C7E8C7;}
+  .box.rule .tag{color:var(--primary);}
+  .box.tip{background:var(--accent-light); border-color:#E2EFB0;}
+  .box.tip .tag{color:var(--accent-text);}
+  .box.warn{background:var(--danger-light); border-color:#FBC9C9;}
+  .box.warn .tag{color:var(--danger);}
+  .box.info{background:var(--info-light); border-color:#BAE3F9;}
+  .box.info .tag{color:var(--info);}
+
+  /* Moldura de print */
+  figure.shot{margin:22px 0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); background:var(--surface);}
+  figure.shot .bar{background:var(--primary); color:#fff; font-size:13px; font-weight:600; padding:8px 14px; display:flex; align-items:center; gap:8px;}
+  figure.shot .bar .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55);}
+  figure.shot .ph{min-height:200px; background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 14px,#f1f3f5 14px,#f1f3f5 28px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-3); text-align:center; padding:30px;}
+  figure.shot .ph .ico{font-size:30px; margin-bottom:8px; opacity:.6;}
+  figure.shot img{display:block; width:100%;}
+  figure.shot figcaption{padding:10px 14px; font-size:13.5px; color:var(--text-2); border-top:1px solid var(--border); background:#fcfdfd;}
+  figure.shot figcaption b{color:var(--primary);}
+
+  /* Tabelas */
+  table{width:100%; border-collapse:collapse; margin:18px 0; font-size:14.5px;}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border);}
+  thead th{background:var(--primary); color:#fff; font-weight:600; font-family:'Inter';}
+  thead th:first-child{border-top-left-radius:10px;}
+  thead th:last-child{border-top-right-radius:10px;}
+  tbody tr:nth-child(even){background:#fafbfc;}
+  td code{background:#F1F3F5; padding:1px 6px; border-radius:5px; font-size:13px;}
+
+  .chip{display:inline-block; background:var(--primary-light); color:var(--primary); font-weight:600; font-size:12.5px; padding:2px 9px; border-radius:6px; border:1px solid #CDEACD;}
+  .menu-ref{display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--border); border-radius:8px; padding:2px 9px; font-weight:600; font-size:13.5px; color:var(--text);}
+  code{font-family:'JetBrains Mono',monospace; font-size:13px;}
+
+  /* Blocos de código */
+  .code-block{position:relative; margin:18px 0; border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow);}
+  .code-block .cb-bar{background:#0E2E0E; color:#9DBF9D; font-size:12.5px; font-weight:600; padding:9px 14px; display:flex; align-items:center; justify-content:space-between;}
+  .code-block .cb-copy{background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); color:#D6F5C9; font-size:12px; font-weight:600; padding:4px 11px; border-radius:7px; cursor:pointer; font-family:'Inter';}
+  .code-block .cb-copy:hover{background:rgba(255,255,255,.18);}
+  .code-block pre{margin:0; padding:18px 20px; background:#0B1F0B; overflow-x:auto;}
+  .code-block code{color:#E3F2E3; font-size:13px; line-height:1.7; white-space:pre;}
+  .code-block .k{color:#8DB600;} .code-block .s{color:#D6F5C9;} .code-block .c{color:#6B8F6B;}
+
+  /* Diagrama de fluxo */
+  .flow{display:flex; align-items:center; gap:8px; margin:26px 0; flex-wrap:wrap; justify-content:center;}
+  .flow .node{background:var(--surface); border:2px solid var(--border); border-radius:14px; padding:16px 18px; text-align:center; flex:1; min-width:150px; box-shadow:var(--shadow);}
+  .flow .node .ico{font-size:26px; margin-bottom:6px;}
+  .flow .node b{display:block; font-size:14px; color:var(--text); margin-bottom:2px;}
+  .flow .node span{font-size:12px; color:var(--text-2);}
+  .flow .node.hl{border-color:var(--primary); background:var(--primary-light);}
+  .flow .arrow{font-size:22px; color:var(--accent); font-weight:800;}
+  @media(max-width:640px){ .flow{flex-direction:column;} .flow .arrow{transform:rotate(90deg);} }
+
+  /* Sumário */
+  .toc{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px 28px; margin:40px 0; box-shadow:var(--shadow);}
+  .toc h2{padding-top:0; font-size:18px; margin-bottom:14px;}
+  .toc ol{margin:0; padding-left:20px; columns:2; column-gap:36px;}
+  .toc li{margin:7px 0; color:var(--text-2);}
+  .toc a{text-decoration:none; color:var(--text-2); font-weight:500;}
+  .toc a:hover{color:var(--primary);}
+
+  footer{background:#0E2E0E; color:#9DBF9D; text-align:center; padding:34px 28px; margin-top:60px; font-size:13.5px;}
+  footer b{color:#D6F5C9;}
+
+  @media print{
+    body{background:#fff; font-size:12pt;}
+    .cover{padding:60px 28px;}
+    section{page-break-inside:avoid;}
+    figure.shot,.box,table,.code-block{page-break-inside:avoid;}
+    .toc{break-after:page;}
+    .code-block .cb-copy{display:none;}
+  }
+  @media(max-width:640px){ .toc ol{columns:1;} .cover h1{font-size:30px;} }
+</style>
+</head>
+<body>
+
+<!-- ════════════ CAPA ════════════ -->
+<div class="cover">
+  <div class="brand">
+    <span class="logo">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1A6B1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/>
+        <path d="M2.5 3h2.2l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6.2"/>
+      </svg>
+    </span>
+    <span class="name">Wiz<b>Mart</b></span>
+  </div>
+  <h1>Guia de Captação de Leads</h1>
+  <div class="sub">WizMart Forms — capture leads do seu site direto no CRM, sem depender de suporte técnico</div>
+  <div class="pill">Perfil: Administrador Master · Versão 1.0</div>
+</div>
+
+<div class="wrap">
+
+  <!-- ════════════ INTRO ════════════ -->
+  <section id="intro">
+    <p class="lead">O <strong>WizMart Forms</strong> conecta os formulários do seu site e das suas landing pages
+    direto ao WizMart CRM: quando alguém preenche um formulário, o lead já nasce como um card no funil certo —
+    sem planilha, sem copiar e colar, sem depender de ninguém da equipe técnica.</p>
+    <p>Este guia mostra <strong>como configurar sozinho</strong>, do zero: criar a fonte de captação, colar o
+    código no seu site (ou pedir para quem cuida do site colar) e testar que está tudo funcionando.</p>
+
+    <div class="box tip">
+      <div class="tag">💡 Como ler este guia</div>
+      <p>Se você tem um site em WordPress, Elementor, RD Station ou similar, vá direto para a seção
+      <strong>"Receitas prontas"</strong>. Se tem um desenvolvedor cuidando do site, encaminhe a seção
+      <strong>"Integração direta"</strong> para ele.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ SUMÁRIO ════════════ -->
+  <div class="toc">
+    <h2>O que você vai aprender</h2>
+    <ol>
+      <li><a href="#comofunciona">Como funciona</a></li>
+      <li><a href="#fonte">Criando uma fonte de captação</a></li>
+      <li><a href="#dominios">Gerenciando domínios sozinho</a></li>
+      <li><a href="#opcaoA">Opção A — Colar o código (recomendado)</a></li>
+      <li><a href="#turnstile">Verificação anti-robô (opcional)</a></li>
+      <li><a href="#opcaoB">Opção B — Integração direta (para devs)</a></li>
+      <li><a href="#receitas">Receitas prontas</a></li>
+      <li><a href="#utms">Campanhas e UTMs</a></li>
+      <li><a href="#teste">Testando a integração</a></li>
+      <li><a href="#duvidas">Dúvidas comuns e solução de problemas</a></li>
+    </ol>
+  </div>
+
+  <!-- ════════════ 1 COMO FUNCIONA ════════════ -->
+  <section id="comofunciona">
+    <h2><span class="num">1</span>Como funciona</h2>
+    <p>O fluxo é simples: o visitante preenche o formulário no seu site, o WizMart Forms envia o contato
+    para o CRM de forma segura, e o lead já aparece como card no funil — pronto para o time trabalhar.</p>
+
+    <div class="flow">
+      <div class="node"><div class="ico">🌐</div><b>Seu site</b><span>Formulário preenchido</span></div>
+      <div class="arrow">→</div>
+      <div class="node hl"><div class="ico">🔒</div><b>WizMart Forms</b><span>Verificação anti-robô + envio seguro</span></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="ico">📋</div><b>WizMart CRM</b><span>Lead vira card no funil</span></div>
+    </div>
+
+    <p>Cada site (ou cada landing page) recebe uma <strong>fonte de captação</strong> própria no CRM, com sua
+    <strong>chave de acesso</strong> e a lista de <strong>domínios autorizados</strong> a enviar leads por ela.
+    Isso impede que outras pessoas usem sua chave em sites que não são seus.</p>
+
+    <div class="box rule">
+      <div class="tag">📋 Segurança embutida</div>
+      <p>Todo envio passa por múltiplas camadas de proteção automáticas: verificação de domínio, limite de
+      envios por minuto, detecção de robôs e (opcionalmente) verificação anti-robô visível. Você não precisa
+      configurar nada disso — já vem pronto em cada fonte que você cria.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 2 CRIANDO UMA FONTE ════════════ -->
+  <section id="fonte">
+    <h2><span class="num">2</span>Criando uma fonte de captação</h2>
+    <p>Acesse <span class="menu-ref">⚙️ Configurações</span> → aba <strong>📥 Captação de Leads</strong>.</p>
+    <ol class="steps">
+      <li>Clique em <b>Nova Fonte</b>.</li>
+      <li>Dê um <b>nome</b> que identifique o site ou a campanha (ex.: "Site Institucional" ou "Landing Page Smart Café — Julho").</li>
+      <li>Informe os <b>domínios permitidos</b> — um por linha (ex.: <code>https://wizmart.com.br</code>). Use <code>https://*.wizmart.com.br</code> para liberar qualquer subdomínio.</li>
+      <li>Escolha o <b>funil de destino</b>: é nele que o card vai nascer.</li>
+      <li>Escolha um <b>responsável</b> (opcional) — se não escolher, os gestores são avisados de cada lead novo.</li>
+      <li>Clique em <b>Criar fonte e gerar chave</b>.</li>
+    </ol>
+
+    <div class="box warn">
+      <div class="tag">⚠️ Guarde a chave — ela aparece uma única vez</div>
+      <p>Por segurança, o CRM <strong>não guarda a chave em texto</strong> — só uma "impressão digital" dela.
+      Assim que a fonte é criada, a chave aparece <strong>uma única vez</strong> na tela, com um botão de copiar.
+      Copie e cole no seu site imediatamente. Se perder, não tem problema: você pode gerar uma nova a qualquer
+      momento (veja a seção seguinte).</p>
+    </div>
+
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Configurações → Captação de Leads</div>
+      <img src="assets/leads-01-lista.png" alt="Lista de fontes de captação" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/leads-01-lista.png</b><br><small>Destacar a tabela de fontes, contadores de recebidos/bloqueados e o botão "Nova Fonte"</small></div>
+      <figcaption><b>Onde clicar:</b> aqui você vê todas as fontes, quantos leads cada uma recebeu e quantos foram bloqueados.</figcaption>
+    </figure>
+
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Chave gerada — exibida uma única vez</div>
+      <img src="assets/leads-02-chave.png" alt="Modal com a chave da fonte" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/leads-02-chave.png</b><br><small>Destacar o campo da chave e o botão "Copiar"</small></div>
+      <figcaption><b>Atenção:</b> feche esta janela só depois de copiar e colar a chave no seu site.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ════════════ 3 DOMÍNIOS ════════════ -->
+  <section id="dominios">
+    <h2><span class="num">3</span>Gerenciando domínios sozinho</h2>
+    <p>Você não depende de ninguém para ajustar uma fonte. Tudo isso vale <strong>na hora</strong>, sem precisar
+    esperar uma atualização do sistema:</p>
+    <ul class="clean">
+      <li><strong>Surgiu um site novo?</strong> Crie uma nova fonte (seção anterior) e cole o código nele.</li>
+      <li><strong>Trocou o domínio de um site existente?</strong> Clique em <b>Editar</b> na fonte e atualize a lista de domínios.</li>
+      <li><strong>Precisa pausar temporariamente?</strong> Use o botão de <b>ativar/desativar</b> (o interruptor da coluna "Ativa") — a fonte para de aceitar leads imediatamente, e você reativa quando quiser.</li>
+      <li><strong>Desconfia que a chave vazou?</strong> Clique em <b>Rotacionar chave</b> — a chave antiga para de funcionar na hora e uma nova é gerada. Só é preciso atualizar o site com a chave nova.</li>
+    </ul>
+    <div class="box tip">
+      <div class="tag">💡 Nada disso passa por deploy</div>
+      <p>Essas mudanças são configuração, não código — valem imediatamente, sem precisar de nenhuma ação da
+      equipe técnica.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 4 OPÇÃO A ════════════ -->
+  <section id="opcaoA">
+    <h2><span class="num">4</span>Opção A — Colar o código (recomendado)</h2>
+    <p>É a forma mais simples: cole <strong>uma linha de script</strong> e adicione <strong>um atributo</strong>
+    ao seu formulário. O WizMart Forms cuida do resto — envio, proteção anti-robô e mensagens de sucesso/erro.</p>
+
+    <h3>Passo 1 — Cole o script uma vez na página</h3>
+    <div class="code-block">
+      <div class="cb-bar"><span>HTML</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>&lt;script src="https://wizmart-crm.web.app/wizforms.js"&gt;&lt;/script&gt;</code></pre>
+    </div>
+
+    <h3>Passo 2 — Adicione o atributo <code>data-wizmart-key</code> ao seu formulário</h3>
+    <div class="code-block">
+      <div class="cb-bar"><span>HTML</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>&lt;form data-wizmart-key="SUA_CHAVE_AQUI"&gt;
+  &lt;input type="text"  name="name"    placeholder="Seu nome" required&gt;
+  &lt;input type="email" name="email"   placeholder="Seu e-mail"&gt;
+  &lt;input type="tel"   name="phone"   placeholder="Seu WhatsApp"&gt;
+  &lt;input type="text"  name="company" placeholder="Empresa"&gt;
+  &lt;button type="submit"&gt;Quero saber mais&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+    </div>
+
+    <p>Pronto — é só isso. Troque <code>SUA_CHAVE_AQUI</code> pela chave que você copiou ao criar a fonte.
+    Os nomes dos campos (<code>name</code>, <code>email</code>, <code>phone</code>, <code>company</code>,
+    <code>message</code>) precisam ser exatamente esses para o CRM reconhecê-los; qualquer outro campo do
+    formulário (ex.: "cidade", "interesse") também é enviado e fica disponível no card.</p>
+
+    <h3>Personalizando mensagens e comportamento (opcional)</h3>
+    <table>
+      <thead><tr><th>Atributo do <code>&lt;form&gt;</code></th><th>Para que serve</th></tr></thead>
+      <tbody>
+        <tr><td><code>data-wizmart-success</code></td><td>Mensagem exibida quando o envio dá certo</td></tr>
+        <tr><td><code>data-wizmart-error</code></td><td>Mensagem exibida quando o envio falha</td></tr>
+        <tr><td><code>data-wizmart-redirect</code></td><td>Página para redirecionar após o envio (ex.: uma página de agradecimento)</td></tr>
+      </tbody>
+    </table>
+    <div class="code-block">
+      <div class="cb-bar"><span>HTML — exemplo com opções</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>&lt;form
+  data-wizmart-key="SUA_CHAVE_AQUI"
+  data-wizmart-success="Recebemos seu contato! Já vamos te chamar no WhatsApp."
+  data-wizmart-redirect="/obrigado"&gt;
+  ...
+&lt;/form&gt;</code></pre>
+    </div>
+  </section>
+
+  <!-- ════════════ 5 TURNSTILE ════════════ -->
+  <section id="turnstile">
+    <h2><span class="num">5</span>Verificação anti-robô (opcional)</h2>
+    <p>Toda fonte já vem com proteção automática contra robôs (invisível para quem preenche o formulário).
+    Se uma fonte específica estiver recebendo muito spam, você pode ativar uma camada extra — um pequeno
+    desafio visual do Cloudflare (o mesmo usado por milhões de sites).</p>
+    <ol class="steps">
+      <li>Na fonte, marque a opção <b>"Exigir verificação anti-robô Cloudflare Turnstile"</b> (ao criar ou editar).</li>
+      <li>Peça para quem cuida do seu site adicionar o atributo <code>data-wizmart-turnstile-sitekey</code>
+      no formulário, com a chave pública fornecida pelo time técnico.</li>
+    </ol>
+    <div class="code-block">
+      <div class="cb-bar"><span>HTML</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>&lt;form data-wizmart-key="SUA_CHAVE_AQUI" data-wizmart-turnstile-sitekey="CHAVE_PUBLICA_TURNSTILE"&gt;
+  ...
+&lt;/form&gt;</code></pre>
+    </div>
+    <p>O widget de verificação aparece sozinho dentro do formulário — não precisa de mais nenhuma configuração.</p>
+    <div class="box info">
+      <div class="tag">ℹ️ Quando usar</div>
+      <p>A maioria dos sites <strong>não precisa</strong> disso — as proteções automáticas já bloqueiam a
+      grande maioria dos robôs. Ative apenas se notar spam recorrente numa fonte específica (acompanhe o
+      contador "Bloqueados" na lista de fontes).</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 6 OPÇÃO B ════════════ -->
+  <section id="opcaoB">
+    <h2><span class="num">6</span>Opção B — Integração direta (para desenvolvedores)</h2>
+    <p>Se o seu site usa um sistema próprio de formulários (ou você quer integrar via JavaScript, app ou
+    outro sistema), pode enviar o lead diretamente por uma chamada HTTP — sem depender do script pronto.</p>
+
+    <div class="code-block">
+      <div class="cb-bar"><span>Requisição</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>POST https://wizmart-crm.web.app/api/leads
+Content-Type: application/json
+X-WizMart-Key: SUA_CHAVE_AQUI
+
+{
+  "name": "Maria Silva",
+  "email": "maria@empresa.com.br",
+  "phone": "(11) 98765-4321",
+  "company": "Mercado Bom Preço",
+  "message": "Quero saber mais sobre o Smart Café",
+  "tracking": {
+    "utmSource": "google",
+    "utmCampaign": "lancamento",
+    "pageUrl": "https://seusite.com.br/landing"
+  }
+}</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="cb-bar"><span>Resposta — sucesso (201)</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>{ "ok": true, "leadId": "aB3cD9eF..." }</code></pre>
+    </div>
+
+    <p>A requisição precisa ser feita <strong>do domínio autorizado</strong> na fonte (o header <code>Origin</code>
+    do navegador é conferido automaticamente). Para o contrato técnico completo — todos os campos aceitos,
+    limites e códigos de erro — consulte o documento <strong>API-LEADS.md</strong>, entregue junto com este guia.</p>
+
+    <table>
+      <thead><tr><th>Código</th><th>Situação</th></tr></thead>
+      <tbody>
+        <tr><td><code>201</code></td><td>Lead recebido com sucesso</td></tr>
+        <tr><td><code>400</code></td><td>Dados inválidos (falta nome, ou nem e-mail nem telefone informado)</td></tr>
+        <tr><td><code>401</code></td><td>Chave inválida ou fonte desativada</td></tr>
+        <tr><td><code>403</code></td><td>Domínio não autorizado para esta fonte</td></tr>
+        <tr><td><code>429</code></td><td>Muitos envios em pouco tempo (limite de proteção)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ════════════ 7 RECEITAS ════════════ -->
+  <section id="receitas">
+    <h2><span class="num">7</span>Receitas prontas</h2>
+
+    <h3>WordPress / Elementor</h3>
+    <p>O formulário nativo do Elementor não permite atributos personalizados. O caminho mais simples e
+    confiável é usar um bloco de <strong>HTML personalizado</strong>:</p>
+    <ol class="steps">
+      <li>Na página, adicione o widget/bloco <b>"HTML Personalizado"</b> (Elementor) ou um bloco <b>"HTML"</b> (editor padrão do WordPress).</li>
+      <li>Cole o código completo da <a href="#opcaoA">Opção A</a> (script + formulário) dentro do bloco.</li>
+      <li>Estilize o formulário com CSS próprio do seu tema, se quiser — o WizMart Forms não interfere na aparência, só no envio.</li>
+    </ol>
+
+    <h3>RD Station Landing Pages / outros construtores de página</h3>
+    <p>A maioria dos construtores de landing page (RD Station, Unbounce, Instapage, etc.) tem um campo de
+    <strong>"HTML personalizado"</strong> ou <strong>"Código embed"</strong>. O procedimento é o mesmo:</p>
+    <ol class="steps">
+      <li>Adicione um bloco de HTML/embed na página.</li>
+      <li>Cole o código completo da <a href="#opcaoA">Opção A</a>.</li>
+      <li>Publique a página normalmente.</li>
+    </ol>
+
+    <h3>Formulário HTML puro (qualquer site)</h3>
+    <p>Se o seu site já é feito em HTML "cru" (sem construtor visual), basta seguir a <a href="#opcaoA">Opção A</a>
+    diretamente no arquivo da página.</p>
+
+    <div class="box tip">
+      <div class="tag">💡 Não precisa trocar de plataforma</div>
+      <p>O WizMart Forms funciona em cima do formulário que você já tem — não é preciso migrar de ferramenta
+      nem recriar o design da página.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 8 UTMS ════════════ -->
+  <section id="utms">
+    <h2><span class="num">8</span>Campanhas e UTMs</h2>
+    <p>Se o link que trouxe o visitante até o formulário tiver parâmetros de campanha na URL (UTMs — usados
+    no Google Ads, Meta Ads, e-mail marketing, etc.), o WizMart Forms captura automaticamente e mostra no
+    card do CRM.</p>
+    <div class="code-block">
+      <div class="cb-bar"><span>Exemplo de link de campanha</span><button class="cb-copy" onclick="wmCopy(this)">Copiar</button></div>
+      <pre><code>https://seusite.com.br/landing?utm_source=google&amp;utm_campaign=lancamento_julho</code></pre>
+    </div>
+    <p>No card do negócio, aparece um selo <strong>"Origem: [nome da fonte]"</strong> junto com badges das
+    campanhas identificadas — assim o time sabe exatamente de onde veio cada lead, sem precisar perguntar.</p>
+  </section>
+
+  <!-- ════════════ 9 TESTE ════════════ -->
+  <section id="teste">
+    <h2><span class="num">9</span>Testando a integração</h2>
+    <p>Depois de colar o código, faça este teste rápido:</p>
+    <ol class="steps">
+      <li>Abra o formulário no seu site (em uma aba anônima, para simular um visitante real).</li>
+      <li>Preencha os campos com um <b>dado de teste</b> (ex.: seu próprio e-mail) e envie.</li>
+      <li>Você deve ver a <b>mensagem de sucesso</b> aparecer no site em poucos segundos.</li>
+      <li>No CRM, abra o <b>funil de destino</b> da fonte — o card deve aparecer em até <b>10 segundos</b> no primeiro estágio.</li>
+      <li>Volte em <b>Configurações → Captação de Leads</b> e confira o contador <b>"Recebidos"</b> da fonte — deve ter subido em 1.</li>
+    </ol>
+    <div class="box rule">
+      <div class="tag">📋 Tudo certo quando…</div>
+      <p>O card aparece no funil <strong>com o selo de origem</strong> (nome da fonte) e o contador de
+      "Recebidos" sobe a cada teste.</p>
+    </div>
+  </section>
+
+  <!-- ════════════ 10 DÚVIDAS ════════════ -->
+  <section id="duvidas">
+    <h2><span class="num">10</span>Dúvidas comuns e solução de problemas</h2>
+    <table>
+      <thead><tr><th>O que você vê</th><th>Causa provável</th><th>O que fazer</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Preenchi o formulário mas nada aconteceu na tela</td>
+          <td>O script não foi carregado, ou o atributo <code>data-wizmart-key</code> está faltando/errado</td>
+          <td>Confira se a linha do <code>&lt;script&gt;</code> está na página e se a chave foi colada corretamente</td>
+        </tr>
+        <tr>
+          <td>Mensagem de erro aparece ao enviar</td>
+          <td>Domínio não cadastrado na fonte, ou chave desativada/rotacionada</td>
+          <td>Em Configurações → Captação de Leads, confira os domínios autorizados e se a fonte está <b>ativa</b></td>
+        </tr>
+        <tr>
+          <td>O contador "Bloqueados" está subindo bastante</td>
+          <td>Robôs tentando preencher o formulário automaticamente</td>
+          <td>Normal em baixo volume (as proteções já barram sozinhas); se persistir, ative o <a href="#turnstile">Turnstile</a></td>
+        </tr>
+        <tr>
+          <td>O lead chegou duplicado no funil</td>
+          <td>A pessoa preencheu o formulário mais de uma vez</td>
+          <td>O sistema já evita duplicidade em 24h para o mesmo e-mail/telefone — se aconteceu, confira se os dados eram realmente diferentes</td>
+        </tr>
+        <tr>
+          <td>Testei e não apareceu nenhum card</td>
+          <td>Fonte apontando para o funil errado, ou você está olhando outro funil</td>
+          <td>Confira em Configurações → Captação de Leads qual é o "Funil de destino" da fonte</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="box tip">
+      <div class="tag">💡 Ainda com dúvida?</div>
+      <p>Fale com o time técnico informando o <strong>nome da fonte</strong> e o <strong>horário do teste</strong> —
+      isso agiliza bastante a investigação.</p>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <b>WizMart CRM</b> · Guia de Captação de Leads (WizMart Forms) · Versão 1.0<br>
+  Documento de treinamento — uso interno do time comercial. Referência técnica completa em <b>API-LEADS.md</b>.
+</footer>
+
+<script>
+  function wmCopy(btn){
+    var pre = btn.closest('.code-block').querySelector('code');
+    var text = pre.innerText;
+    navigator.clipboard.writeText(text).then(function(){
+      var original = btn.textContent;
+      btn.textContent = 'Copiado!';
+      setTimeout(function(){ btn.textContent = original; }, 1600);
+    });
+  }
+</script>
+
+</body>
+</html>

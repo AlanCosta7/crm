@@ -46,6 +46,12 @@ vi.mock('../../stores/uiStore', () => ({
 const mockUseCadencia = vi.fn();
 vi.mock('./useCadencia', () => ({ useCadencia: () => mockUseCadencia() }));
 
+// Alertas de agenda leem a coleção activities via useFirestore — mock vazio
+vi.mock('../../hooks/useFirestore', () => ({
+  useFirestoreCollection: () => ({ data: [], loading: false, error: null }),
+  useFirestoreMutations: () => ({ addDocument: vi.fn(), updateDocument: vi.fn(), deleteDocument: vi.fn() }),
+}));
+
 // Mock do CompleteActivityModal para simplificar testes de interação
 vi.mock('./CompleteActivityModal', () => ({
   CompleteActivityModal: ({ onCancel }: any) => (

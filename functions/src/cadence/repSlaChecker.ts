@@ -15,9 +15,7 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
-import { getTodayBRT } from "./cadenceUtils";
-
-const SLA_BUSINESS_DAYS = 3;
+import { getTodayBRT, normalizeCadenceConfig } from "./cadenceUtils";
 
 export const repSlaChecker = onSchedule(
   {
@@ -25,6 +23,7 @@ export const repSlaChecker = onSchedule(
     timeZone: "America/Sao_Paulo",
     retryCount: 2,
     timeoutSeconds: 300,
+    region: "southamerica-east1",
   },
   async () => {
     const db = admin.firestore();
@@ -52,6 +51,13 @@ async function checkRepsForTenant(
   db: admin.firestore.Firestore,
   tenantId: string,
 ): Promise<void> {
+  // SLA configurável pela gestão (settings/cadence → rep.firstContactBusinessDays)
+  let slaBusinessDays = 3;
+  try {
+    const cfgSnap = await db.doc(`tenants/${tenantId}/settings/cadence`).get();
+    slaBusinessDays = normalizeCadenceConfig(cfgSnap.exists ? cfgSnap.data() : null).repFirstContactBusinessDays;
+  } catch { /* mantém padrão */ }
+
   const repsSnap = await db
     .collection(`tenants/${tenantId}/users`)
     .where("role", "==", "rep")
@@ -63,7 +69,7 @@ async function checkRepsForTenant(
   for (const repDoc of repsSnap.docs) {
     const repId = repDoc.id;
     try {
-      await checkRepSla(db, tenantId, repId);
+      await checkRepSla(db, tenantId, repId, slaBusinessDays);
     } catch (err) {
       console.error(`[repSlaChecker] Erro no Rep ${repId}:`, err);
     }
@@ -75,6 +81,7 @@ async function checkRepSla(
   db: admin.firestore.Firestore,
   tenantId: string,
   repId: string,
+  SLA_BUSINESS_DAYS: number,
 ): Promise<void> {
   // Busca a atividade mais recente concluída ou pendente do Rep
   const activitiesSnap = await db
@@ -144,7 +151,7 @@ async function checkRepSla(
   }
 
   // Rep está em violação de SLA — cria follow-up automático e notifica gestor
-  await createAutoFollowUp(db, tenantId, repId);
+  await createAutoFollowUp(db, tenantId, repId, SLA_BUSINESS_DAYS);
 }
 
 // ── Cria atividade automática e notifica gestor ───────────────────────────────
@@ -152,6 +159,7 @@ async function createAutoFollowUp(
   db: admin.firestore.Firestore,
   tenantId: string,
   repId: string,
+  SLA_BUSINESS_DAYS: number,
 ): Promise<void> {
   const autoDate = addBusinessDays(new Date(), 1);
 
@@ -207,6 +215,7 @@ export const activityOverdueChecker = onSchedule(
     timeZone: "America/Sao_Paulo",
     retryCount: 1,
     timeoutSeconds: 180,
+    region: "southamerica-east1",
   },
   async () => {
     const db = admin.firestore();

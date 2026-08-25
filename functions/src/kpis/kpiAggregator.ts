@@ -11,6 +11,7 @@ export const kpiAggregator = onSchedule(
     schedule: "0 * * * *",
     timeZone: "America/Sao_Paulo",
     memory: "512MiB",
+    region: "southamerica-east1",
   },
   async () => {
     const db = admin.firestore();

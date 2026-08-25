@@ -14,9 +14,14 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { exchangeCodeForTokens } from "./calendarService";
 
-const CRM_BASE_URL = process.env.CRM_BASE_URL || "https://crm.wizmart.com.br";
+const CRM_BASE_URL = process.env.CRM_BASE_URL || "https://crm-codifyx.web.app";
 
-export const calendarOAuthCallback = onRequest(async (req, res) => {
+export const calendarOAuthCallback = onRequest(
+  {
+    region: "southamerica-east1",
+    secrets: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"],
+  },
+  async (req, res) => {
   const code  = req.query.code  as string | undefined;
   const state = req.query.state as string | undefined;
   const error = req.query.error as string | undefined;
@@ -50,4 +55,5 @@ export const calendarOAuthCallback = onRequest(async (req, res) => {
     console.error("[calendarOAuthCallback] Erro ao trocar tokens:", err.message);
     res.redirect(`${CRM_BASE_URL}/settings?calendar=error`);
   }
-});
+  }
+);

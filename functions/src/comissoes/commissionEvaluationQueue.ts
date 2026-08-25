@@ -43,6 +43,7 @@ export const commissionEvaluationQueue = onSchedule(
     timeZone: "America/Sao_Paulo",
     retryCount: 3,
     timeoutSeconds: 540,
+    region: "southamerica-east1",
   },
   async () => {
     const db = admin.firestore();

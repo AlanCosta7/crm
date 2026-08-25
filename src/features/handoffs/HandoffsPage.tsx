@@ -28,6 +28,7 @@ import {
 import { PRODUCT_COLOR } from '../../utils/crmFormat';
 import { useUIStore } from '../../stores/uiStore';
 import { matchesProductId } from '../../utils/productScope';
+import { dealParticipantConstraint } from '../../utils/dealQueryScope';
 
 // ── Modal de Recusa ───────────────────────────────────────────────────────────
 interface DeclineModalProps {
@@ -198,7 +199,7 @@ export function HandoffsPage() {
 
   const { data: handoffs, loading } = useFirestoreCollection<Handoff>('handoffs');
   const { data: allUsers }          = useFirestoreCollection<SettingUser>('users');
-  const { data: deals }             = useFirestoreCollection<Deal>('deals');
+  const { data: deals }             = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
 
   const [decliningHandoff, setDecliningHandoff] = useState<Handoff | null>(null);
   const [processingId,     setProcessingId]     = useState<string | null>(null);

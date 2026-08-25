@@ -65,6 +65,7 @@ function hojeBRT() {
   return f.format(new Date()); // 'YYYY-MM-DD'
 }
 function isoDaysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); }
+function isoDaysFromNow(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString(); }
 
 const HOJE = hojeBRT();
 
@@ -104,12 +105,39 @@ const dailyQueue = {
 
 // Handoffs (SDR → Rep). O Rep logado vê em "Handoffs".
 const handoffs = [
+  // ── Pendentes (aba padrão ao abrir a tela)
   { id: 'demo-handoff-1', dealId: 'demo-deal-com1', productId: 'wizmart',
-    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid, priorityChannel: 'whatsapp', visitType: 'presential',
-    notes: '[DEMO] Cliente quente, prefere contato à tarde.', status: 'pending_rep_acceptance' },
+    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid,
+    priorityChannel: 'whatsapp', visitType: 'presential',
+    visitScheduledAt: isoDaysFromNow(2),
+    notes: '[DEMO] Cliente quente, prefere contato à tarde. Tem espaço para minimercado de até 4 gôndolas.',
+    status: 'pending_rep_acceptance' },
+  { id: 'demo-handoff-3', dealId: 'demo-deal-q1', productId: 'wizmart',
+    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid,
+    priorityChannel: 'call', visitType: 'presential',
+    visitScheduledAt: isoDaysFromNow(4),
+    notes: '[DEMO] Proprietário confirmou interesse por videoconferência. Aguarda proposta comercial.',
+    status: 'pending_rep_acceptance' },
+  // ── Aceitos
   { id: 'demo-handoff-2', dealId: 'demo-deal-com2', productId: 'smart_cafe',
-    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid, priorityChannel: 'call', visitType: 'video',
-    notes: '[DEMO] Reunião de fechamento agendada.', status: 'accepted', acceptedAt: TS() },
+    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid,
+    priorityChannel: 'email', visitType: 'video',
+    visitScheduledAt: isoDaysFromNow(1),
+    notes: '[DEMO] Reunião de fechamento agendada. Decisor é o gerente de RH.',
+    status: 'accepted', acceptedAt: isoDaysAgo(1) },
+  { id: 'demo-handoff-4', dealId: 'demo-deal-q2', productId: 'wizmart',
+    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid,
+    priorityChannel: 'whatsapp', visitType: 'presential',
+    visitScheduledAt: isoDaysAgo(3),
+    notes: '[DEMO] Visita já realizada. Contrato em elaboração.',
+    status: 'accepted', acceptedAt: isoDaysAgo(5) },
+  // ── Recusado (histórico)
+  { id: 'demo-handoff-5', dealId: 'demo-deal-com1', productId: 'wizmart',
+    fromSdrId: cfg.sdr.uid, toRepId: cfg.rep.uid,
+    priorityChannel: 'call', visitType: 'presential',
+    visitScheduledAt: isoDaysAgo(10),
+    notes: '[DEMO] Lead fora da área de cobertura do representante.',
+    status: 'declined', declinedReason: '[DEMO] Fora do meu território. Favor reatribuir para a região Sul.' },
 ];
 
 // Projetos de Layout / Fila de Projetos (project_requests)
@@ -166,7 +194,7 @@ async function run() {
   console.log(`  • SDR tier: ${cfg.sdr.tier}`);
   console.log(`  • ${deals.length} negócios (2 ativados p/ comissão, 2 em fila p/ cadência)`);
   console.log(`  • Cadência de hoje (${HOJE}): ${dailyQueue.cards.length} cards p/ SDR ${cfg.sdr.uid}`);
-  console.log(`  • ${handoffs.length} handoffs p/ Rep ${cfg.rep.uid}`);
+  console.log(`  • ${handoffs.length} handoffs p/ Rep ${cfg.rep.uid} (2 pendentes, 2 aceitos, 1 recusado)`);
   console.log(`  • ${projectRequests.length} projetos de layout${cfg.design.uid ? ' (1 atribuído ao designer)' : ''}`);
   console.log('\n✓ Seed de produção concluído. Tudo prefixado com "demo-"/"[DEMO]" — use --purge para remover.\n');
 }

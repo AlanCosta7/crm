@@ -7,7 +7,7 @@ import { refreshTvSnapshot } from "./tvHelper";
  * Sincroniza em tempo real o snapshot dos KPIs e classificação no RTDB `/public_tv/{token}`.
  */
 export const onTokenChange = onDocumentWritten(
-  "tenants/{tenantId}/tv_links/{linkId}",
+  { document: "tenants/{tenantId}/tv_links/{linkId}", region: "southamerica-east1" },
   async (event) => {
     const change = event.data;
     if (!change) return;

@@ -34,6 +34,8 @@ const CadenciaPage = lazy(() => import('../features/cadencia/CadenciaPage'));
 
 // Fase 5 — Handoffs Rep
 const HandoffsPage = lazy(() => import('../features/handoffs/HandoffsPage'));
+// Ajustes jul/2026 — Página inteira do lead
+const LeadPage = lazy(() => import('../features/deals/LeadPage'));
 // Fase 7 — Moedas e Loja
 const CarteiraPage = lazy(() => import('../features/carteira/CarteiraPage'));
 const LojaPage     = lazy(() => import('../features/loja/LojaPage'));
@@ -44,6 +46,8 @@ const DesignQueuePage = lazy(() => import('../features/projetos/DesignQueuePage'
 
 // Sprint 5 — Metas
 const MetasPage = lazy(() => import('../features/settings/MetasPage'));
+// Ajustes jul/2026 — Programação manual da cadência
+const CadenceConfigPage = lazy(() => import('../features/settings/CadenceConfigPage'));
 
 // Comissões — Calculadora de comissão (gerente comercial)
 const ComissoesPage = lazy(() => import('../features/comissoes/ComissoesPage'));
@@ -83,6 +87,9 @@ export const router = createBrowserRouter([
     ),
   },
 
+  // ── Página inteira do lead — todos os papéis que leem deals ───────────────
+  { path: '/lead/:dealId', element: <P roles={['master', 'manager', 'bdr', 'sdr', 'rep', 'viewer', 'design'] as any}><LeadPage /></P> },
+
   // ── Tarefas legadas ────────────────────────────────────────────────────────
   { path: '/tasks',      element: <P permission="view_tasks"><TasksPage /></P> },
 
@@ -105,6 +112,7 @@ export const router = createBrowserRouter([
 
   // ── Sprint 5: Metas ───────────────────────────────────────────────────────
   { path: '/settings/metas', element: <P roles={['master', 'manager'] as Role[]}><MetasPage /></P> },
+  { path: '/settings/cadencia', element: <P roles={['master', 'manager'] as Role[]}><CadenceConfigPage /></P> },
   { path: '/comissoes',           element: <P roles={['master', 'manager'] as Role[]}><ComissoesPage /></P> },
   { path: '/comissoes/relatorio', element: <P roles={['master', 'manager'] as Role[]}><RelatorioComissoesPage /></P> },
 

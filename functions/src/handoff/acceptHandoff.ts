@@ -18,9 +18,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { normalizeCadenceConfig } from "../cadence/cadenceUtils";
+
+const REGION = "southamerica-east1";
 
 // ── acceptHandoff ─────────────────────────────────────────────────────────────
-export const acceptHandoff = onCall(async (request) => {
+export const acceptHandoff = onCall({ region: REGION }, async (request) => {
   const { handoffId, tenantId } = request.data as { handoffId: string; tenantId: string };
   const uid = request.auth?.uid;
 
@@ -56,8 +59,18 @@ export const acceptHandoff = onCall(async (request) => {
   const deal = dealSnap.data();
   const productId = deal?.productId || handoff.productId || "wizmart";
 
-  // Calcula data máxima da primeira atividade (hoje + 3 dias úteis)
-  const firstActivityDate = addBusinessDays(new Date(), 3);
+  // Nome do Rep que assume de fato (pode ser diferente de quem chamou, se foi
+  // um gestor aceitando em nome dele) — usado na mensagem da timeline.
+  const repProfileSnap = await db.doc(`tenants/${tenantId}/users/${handoff.toRepId}`).get();
+  const repName: string = repProfileSnap.data()?.name || "Representante";
+
+  // Calcula data máxima da primeira atividade (hoje + SLA configurável, padrão 3 dias úteis)
+  let slaDays = 3;
+  try {
+    const cfgSnap = await db.doc(`tenants/${tenantId}/settings/cadence`).get();
+    slaDays = normalizeCadenceConfig(cfgSnap.exists ? cfgSnap.data() : null).repFirstContactBusinessDays;
+  } catch { /* mantém padrão */ }
+  const firstActivityDate = addBusinessDays(new Date(), slaDays);
 
   const batch = db.batch();
 
@@ -110,6 +123,22 @@ export const acceptHandoff = onCall(async (request) => {
     createdAt: FieldValue.serverTimestamp(),
   });
 
+  // 5. Rastreio da passagem de bastão SDR→Rep (Fase C do plano de assinaturas)
+  const acceptTimelineRef = db
+    .collection(`tenants/${tenantId}/deal_timeline`)
+    .doc(handoff.dealId)
+    .collection("events")
+    .doc();
+  batch.set(acceptTimelineRef, {
+    type: "handoff_accepted",
+    dealId: handoff.dealId,
+    handoffId,
+    repId: handoff.toRepId,
+    message: `✅ ${repName} aceitou a passagem de bastão`,
+    createdBy: uid,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
   await batch.commit();
 
   console.log(`[acceptHandoff] Rep ${uid} aceitou handoff ${handoffId} no tenant ${tenantId}`);
@@ -117,7 +146,7 @@ export const acceptHandoff = onCall(async (request) => {
 });
 
 // ── declineHandoff ────────────────────────────────────────────────────────────
-export const declineHandoff = onCall(async (request) => {
+export const declineHandoff = onCall({ region: REGION }, async (request) => {
   const { handoffId, tenantId, reason } = request.data as {
     handoffId: string;
     tenantId: string;
@@ -142,6 +171,9 @@ export const declineHandoff = onCall(async (request) => {
   const deal = dealSnap.data();
   const productId = deal?.productId || handoff.productId || "wizmart";
 
+  const repProfileSnap = await db.doc(`tenants/${tenantId}/users/${handoff.toRepId}`).get();
+  const repName: string = repProfileSnap.data()?.name || "Representante";
+
   const batch = db.batch();
 
   // 1. Marcar como recusado
@@ -156,6 +188,24 @@ export const declineHandoff = onCall(async (request) => {
     handoffStatus: "pending",
     assignedRepId: null,
     updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // 2b. Rastreio da recusa (Fase C do plano de assinaturas) — ÚNICA fonte de
+  // histórico dessa exceção: participantIds não preserva quem foi substituído.
+  const declineTimelineRef = db
+    .collection(`tenants/${tenantId}/deal_timeline`)
+    .doc(handoff.dealId)
+    .collection("events")
+    .doc();
+  batch.set(declineTimelineRef, {
+    type: "handoff_declined",
+    dealId: handoff.dealId,
+    handoffId,
+    repId: handoff.toRepId,
+    reason,
+    message: `❌ ${repName} recusou a passagem de bastão — ${reason}`,
+    createdBy: uid,
+    createdAt: FieldValue.serverTimestamp(),
   });
 
   // 3. Notificar gestores via atividade no feed

@@ -7,7 +7,7 @@ import { FieldValue } from "firebase-admin/firestore";
  * e inicializa suas tarefas gamificadas, concede pontos e atualiza a empresa associada.
  */
 export const onDealCreate = onDocumentCreated(
-  "tenants/{tenantId}/deals/{dealId}",
+  { document: "tenants/{tenantId}/deals/{dealId}", region: "southamerica-east1" },
   async (event) => {
     const snapshot = event.data;
     if (!snapshot) {

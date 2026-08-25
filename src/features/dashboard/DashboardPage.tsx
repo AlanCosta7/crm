@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import anime from 'animejs';
 
-import { useFirestoreCollection } from '../../hooks/useFirestore';
+import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
 import type { Deal, Activity, Seller, Stage, Handoff, UserGoal } from '../../types/crm';
 import { Av } from '../../components/ui/Av';
 import { Icon } from '../../components/ui/Icon';
@@ -22,6 +22,13 @@ import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
 import { matchesProductId } from '../../utils/productScope';
 import { BrazilMapSVG } from '../../components/ui/BrazilMapSVG';
+import { LeadFunnelWidget } from './LeadFunnelWidget';
+import { classifyDueActivities } from '../../utils/cadenceUtils';
+import { getLostReasonLabel } from '../../utils/lostReasonUtils';
+import { isCardExpired, getLastActivityAt } from '../../utils/cardExpirationUtils';
+import { dealParticipantConstraint } from '../../utils/dealQueryScope';
+import { getSdrWorkload } from '../../utils/sdrWorkload';
+import { AssignSdrModal } from '../pipeline/AssignSdrModal';
 
 // ── Período ───────────────────────────────────────────────────────────────────
 type Period = 'today' | 'week' | 'month';
@@ -184,6 +191,11 @@ function PainelGestao() {
   const priorityDeals = openDeals.slice(0, 5);
 
   useEffect(() => {
+    // Em aba oculta (document.hidden) o requestAnimationFrame do anime.js nunca
+    // dispara, e os cards ficam presos no keyframe inicial (opacity:0). Pular
+    // a animação nesse caso evita cards "invisíveis" — eles continuam com a
+    // opacidade padrão (1) por não terem sido tocados pelo anime.js.
+    if (document.hidden) return;
     anime({ targets: '.kpi-dir-card', translateY: [16, 0], opacity: [0, 1], duration: 700, delay: anime.stagger(80), easing: 'easeOutExpo' });
   }, [period, productScope]);
 
@@ -367,6 +379,9 @@ function PainelGestao() {
         </div>
       )}
 
+      {/* Funil de leads: atribuídos → visitas → fechamento → contrato */}
+      <LeadFunnelWidget deals={scopedDeals} title="Funil de Leads — Time" />
+
       {/* Negócios Prioritários */}
       <div className="card">
         <div className="card-hd">
@@ -536,7 +551,9 @@ function PainelSDR() {
   const { user }  = useAuthStore();
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
-  const { data: deals } = useFirestoreCollection<Deal>('deals');
+  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
+  const { data: sdrActivities } = useFirestoreCollection<Activity>('activities');
+  const agendaAlerts = user?.uid ? classifyDueActivities(sdrActivities as any, user.uid) : { overdue: 0, dueToday: 0 };
 
   const myDeals  = deals.filter(d => d.assignedSdrId === user?.uid && matchesProductId(productScope, d.productId || 'wizmart'));
   const pending  = myDeals.filter(d => !d.tasks?.e || !d.tasks?.w || !d.tasks?.m);
@@ -545,7 +562,13 @@ function PainelSDR() {
   const rate = completionRate(doneActs, totalActs);
   const pct  = Math.round(rate * 100);
 
+  // Cards vencidos: 21 dias sem atividade concluída (Observações do cliente, jul/2026)
+  const expiredCount = myDeals.filter(d => isCardExpired(d, getLastActivityAt(sdrActivities as any, d.id))).length;
+
   useEffect(() => {
+    // Ver comentário equivalente em PainelGestao: pular em aba oculta evita
+    // cards presos em opacity:0 (o rAF do anime.js não dispara em document.hidden).
+    if (document.hidden) return;
     anime({ targets: '.kpi-card-anim', translateY: [20, 0], opacity: [0, 1], duration: 700, delay: anime.stagger(90), easing: 'easeOutExpo' });
   }, []);
 
@@ -561,12 +584,54 @@ function PainelSDR() {
         </button>
       </div>
 
+      {/* Alerta de agenda: atrasadas / prestes a atrasar */}
+      {(agendaAlerts.overdue > 0 || agendaAlerts.dueToday > 0) && (
+        <div role="alert" style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10,
+          background: agendaAlerts.overdue > 0 ? '#FEF2F2' : '#FFFBEB',
+          border: `1px solid ${agendaAlerts.overdue > 0 ? '#FECACA' : '#FDE68A'}`,
+        }}>
+          <Icon name="BellRing" size={17} color={agendaAlerts.overdue > 0 ? '#B91C1C' : '#B45309'} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: agendaAlerts.overdue > 0 ? '#B91C1C' : '#92400E' }}>
+            {agendaAlerts.overdue > 0 && `${agendaAlerts.overdue} atividade${agendaAlerts.overdue > 1 ? 's' : ''} atrasada${agendaAlerts.overdue > 1 ? 's' : ''}`}
+            {agendaAlerts.overdue > 0 && agendaAlerts.dueToday > 0 && ' · '}
+            {agendaAlerts.dueToday > 0 && `${agendaAlerts.dueToday} vence${agendaAlerts.dueToday > 1 ? 'm' : ''} hoje`}
+          </span>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => navigate('/activities')}>
+            Ver atividades
+          </button>
+        </div>
+      )}
+
+      {/* Cards vencidos: 21 dias sem atividade concluída */}
+      {expiredCount > 0 && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 10, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+          <Icon name="AlarmClockOff" size={17} color="#B91C1C" />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#B91C1C' }}>
+            {expiredCount} card{expiredCount > 1 ? 's' : ''} vencido{expiredCount > 1 ? 's' : ''} — 3+ semanas sem atividade
+          </span>
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={() => navigate('/pipeline')}>
+            Ver no Pipeline
+          </button>
+        </div>
+      )}
+
       <div className="grid-cols-4-responsive">
-        <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <span className="label">Conclusão do Dia</span>
+        {/* Bloco principal do SDR: Atividades do Dia > Conclusão do Dia.
+            Clicar direciona para a tela de Atividades (pedido do cliente, jul/2026). */}
+        <div
+          className="card card-pad kpi-card-anim"
+          style={{ display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer' }}
+          onClick={() => navigate('/activities')}
+          role="button"
+          title="Ver todas as atividades do dia"
+        >
+          <span className="label" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            Atividades do Dia <Icon name="ArrowRight" size={12} />
+          </span>
           <div style={{ fontSize: 28, fontWeight: 800, color: pct >= 75 ? 'var(--primary)' : pct >= 50 ? '#F59E0B' : '#EF4444', fontVariantNumeric: 'tabular-nums' }}>{pct}%</div>
           <div className="prog"><div className="fill" style={{ width: pct + '%', background: pct >= 75 ? 'var(--primary)' : pct >= 50 ? '#F59E0B' : '#EF4444', transition: 'width 1s ease' }} /></div>
-          <div className="muted" style={{ fontSize: 12 }}>{doneActs}/{totalActs} atividades</div>
+          <div className="muted" style={{ fontSize: 12 }}>Conclusão do Dia: {doneActs}/{totalActs} atividades</div>
         </div>
         <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <span className="label">Cards Ativos</span>
@@ -579,11 +644,14 @@ function PainelSDR() {
           <div className="muted" style={{ fontSize: 12 }}>acumuladas no Q atual</div>
         </div>
         <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <span className="label">Próximos Cards (previsão)</span>
+          <span className="label">Novos Cards (previsão)</span>
           <div style={{ fontSize: 28, fontWeight: 800, color: '#7C3AED', fontVariantNumeric: 'tabular-nums' }}>{Math.min(3, Math.max(0, Math.floor(3 * rate)))}</div>
           <div className="muted" style={{ fontSize: 12 }}>baseado na taxa de hoje</div>
         </div>
       </div>
+
+      {/* Funil dos meus leads (atribuídos → visitas → fechamento → contrato) */}
+      <LeadFunnelWidget deals={myDeals} title="Funil dos Meus Leads" />
 
       <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -625,13 +693,16 @@ function PainelRep() {
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
   const { data: handoffs } = useFirestoreCollection<Handoff>('handoffs');
-  const { data: deals }    = useFirestoreCollection<Deal>('deals');
+  const { data: deals }    = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
 
   const pending    = handoffs.filter(h => h.toRepId === user?.uid && h.status === 'pending_rep_acceptance' && matchesProductId(productScope, h.productId || 'wizmart'));
   const myDeals    = deals.filter(d => d.assignedRepId === user?.uid && d.status === 'open' && matchesProductId(productScope, d.productId || 'wizmart'));
   const wonDeals   = deals.filter(d => d.assignedRepId === user?.uid && d.status === 'won' && matchesProductId(productScope, d.productId || 'wizmart'));
 
   useEffect(() => {
+    // Ver comentário equivalente em PainelGestao: pular em aba oculta evita
+    // cards presos em opacity:0 (o rAF do anime.js não dispara em document.hidden).
+    if (document.hidden) return;
     anime({ targets: '.kpi-card-anim', translateY: [20, 0], opacity: [0, 1], duration: 700, delay: anime.stagger(90), easing: 'easeOutExpo' });
   }, []);
 
@@ -704,13 +775,101 @@ function PainelBDR() {
   const { user }  = useAuthStore();
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
-  const { data: deals } = useFirestoreCollection<Deal>('deals');
+  // ATENÇÃO: filtro obrigatório pela rule restrita a participantes (Fase B do
+  // PLANO_CARD_ASSINATURAS_VISIBILIDADE.md) — sem ele o Firestore rejeita a
+  // query inteira pro BDR. Efeito colateral conhecido: `sdrMonitor` abaixo só
+  // enxerga leads de CADA SDR que passaram por ESTE bdr especificamente, então
+  // a carga "total" mostrada pode ficar subestimada pra SDRs que também
+  // trabalham leads de outros BDRs. Fix correto é mover esse agregado pra uma
+  // Cloud Function (Admin SDK, ignora rules) — planejado na Fase D2/D3 do
+  // plano (getSdrWorkload() vira callable, não util client-side).
+  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
+  const { data: users } = useFirestoreCollection<any>('users');
+  const { data: activities } = useFirestoreCollection<any>('activities');
+  const { updateDocument: updateDeal } = useFirestoreMutations('deals');
+  const { addDocument: addActivity } = useFirestoreMutations('activities');
 
   const myLeads = deals.filter(d => d.bdrId === user?.uid && matchesProductId(productScope, d.productId || 'wizmart'));
   const inQueue = myLeads.filter(d => d.status === 'in_queue');
   const active  = myLeads.filter(d => d.status === 'open');
 
+  // Atribuição manual BDR→SDR (Fase D2) — convive com a distribuição automática
+  // do dailyCadenceEngine; não substitui a fila, é uma via extra pra reagir na
+  // hora (ex.: um SDR zerou a cadência e está disponível pra mais cards).
+  const [assigningDeal, setAssigningDeal] = useState<Deal | null>(null);
+  const handleAssignSdr = async (data: { sdrId: string; notes?: string }) => {
+    if (!assigningDeal) return;
+    await updateDeal(assigningDeal.id, {
+      status: 'open',
+      assignedSdrId: data.sdrId,
+      assignedAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await addActivity({
+      type: 'note',
+      dealId: assigningDeal.id,
+      userId: user?.uid,
+      text: `Atribuído diretamente pelo BDR${data.notes ? ` — ${data.notes}` : ''}`,
+      status: 'completed',
+      coinsAwarded: 0,
+      wasOnTime: true,
+      cadenceType: 'manual',
+      productId: assigningDeal.productId || 'wizmart',
+    });
+    setAssigningDeal(null);
+  };
+
+  // Leads devolvidos pelo SDR para nova tentativa futura (motivos "Fechou com
+  // concorrente" e "Não tem interesse no momento" — Observações do cliente, jul/2026)
+  const requeuedLeads = myLeads.filter(d => d.requeuedForBdr);
+  const [reactivating, setReactivating] = useState<string | null>(null);
+  const reactivateLead = async (dealId: string) => {
+    setReactivating(dealId);
+    try {
+      await updateDeal(dealId, { status: 'in_queue', requeuedForBdr: false, updatedAt: new Date() });
+    } catch (err) {
+      console.error('[PainelBDR] Erro ao reativar lead:', err);
+    } finally {
+      setReactivating(null);
+    }
+  };
+
+  // ── Monitoramento dos SDRs (Observações do cliente, jul/2026):
+  // o BDR acompanha a cadência de todos para calibrar o envio de leads.
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const isToday = (raw: any) => {
+    const d = raw?.toDate ? raw.toDate() : raw ? new Date(raw) : null;
+    if (!d || isNaN(d.getTime())) return false;
+    return d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }) === todayStr;
+  };
+  const sdrs = users.filter((u: any) => u.role === 'sdr' && u.isActive !== false);
+  const sdrWorkloads = getSdrWorkload(deals, sdrs.map((s: any) => s.id), productScope);
+  const sdrMonitor = sdrs.map((sdr: any) => {
+    const sdrDeals = deals.filter(d => d.assignedSdrId === sdr.id && d.status === 'open'
+      && matchesProductId(productScope, d.productId || 'wizmart'));
+    const todayActs = activities.filter((a: any) => a.userId === sdr.id && isToday(a.createdAt ?? a.scheduledAt)
+      && matchesProductId(productScope, a.productId || 'wizmart'));
+    const done = todayActs.filter((a: any) => a.status === 'completed').length;
+    const pct = todayActs.length > 0 ? Math.round((done / todayActs.length) * 100) : 100;
+    // 4.3 — % de desenvolvimento por lead atribuído: leads com progresso real
+    // (visita agendada, bastão passado ou ≥1 atividade concluída no lead)
+    const developed = sdrDeals.filter(d =>
+      !!d.cohortKeys?.visitScheduledMonth || !!d.visitScheduledAt || !!d.handoffStatus ||
+      activities.some((a: any) => a.dealId === d.id && a.userId === sdr.id && a.status === 'completed')
+    ).length;
+    const devPct = sdrDeals.length > 0 ? Math.round((developed / sdrDeals.length) * 100) : 0;
+    const leads = sdrWorkloads.find(w => w.sdrId === sdr.id)?.leads ?? sdrDeals.length;
+    return { sdr, leads, total: todayActs.length, done, pct, developed, devPct };
+  });
+
+  // 4.2 — % dos meus leads que geraram reunião/visita agendada (visão Pareto 80/20)
+  const myMeetingLeads = myLeads.filter(d => !!d.cohortKeys?.visitScheduledMonth || !!d.visitScheduledAt);
+  const meetingPct = myLeads.length > 0 ? Math.round((myMeetingLeads.length / myLeads.length) * 100) : 0;
+
   useEffect(() => {
+    // Ver comentário equivalente em PainelGestao: pular em aba oculta evita
+    // cards presos em opacity:0 (o rAF do anime.js não dispara em document.hidden).
+    if (document.hidden) return;
     anime({ targets: '.kpi-card-anim', translateY: [20, 0], opacity: [0, 1], duration: 700, delay: anime.stagger(90), easing: 'easeOutExpo' });
   }, []);
 
@@ -742,7 +901,114 @@ function PainelBDR() {
           <div style={{ fontSize: 28, fontWeight: 800, color: '#B45309' }}>{active.length}</div>
           <div className="muted" style={{ fontSize: 12 }}>sendo trabalhados pelo SDR</div>
         </div>
+        <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 10 }} title="Meta Pareto: ~20% dos leads devem concentrar 80% das reuniões — acompanhe a taxa de conversão dos seus leads em reunião agendada.">
+          <span className="label">Leads → Reunião (Pareto 80/20)</span>
+          <div style={{ fontSize: 28, fontWeight: 800, color: meetingPct >= 20 ? 'var(--primary)' : '#B45309' }}>{meetingPct}%</div>
+          <div className="muted" style={{ fontSize: 12 }}>{myMeetingLeads.length} de {myLeads.length} leads com reunião agendada</div>
+        </div>
       </div>
+
+      {/* Funil dos leads gerados por mim */}
+      <LeadFunnelWidget deals={myLeads} title="Funil dos Meus Leads" />
+
+      {/* Atribuição manual BDR→SDR — via extra além da distribuição automática */}
+      {inQueue.length > 0 && (
+        <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h3 style={{ margin: 0 }}>Leads aguardando distribuição</h3>
+            <span className="badge" style={{ background: '#F3E8FF', color: '#7C3AED', border: '1px solid #E9D5FF' }}>
+              {inQueue.length}
+            </span>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: -6 }}>
+            O motor de cadência distribui automaticamente às 7h — atribua direto se já souber pra quem deve ir.
+          </p>
+          {inQueue.map(d => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
+                <div className="muted" style={{ fontSize: 11.5 }}>{d.company}</div>
+              </div>
+              <button className="btn btn-outline btn-sm" onClick={() => setAssigningDeal(d)}>
+                <Icon name="UserPlus" size={13} />
+                Atribuir SDR
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Leads devolvidos pelo SDR para nova tentativa de prospecção futura */}
+      {requeuedLeads.length > 0 && (
+        <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h3 style={{ margin: 0 }}>Leads para nova tentativa</h3>
+            <span className="badge" style={{ background: '#FFFBEB', color: '#92400E', border: '1px solid #FDE68A' }}>
+              {requeuedLeads.length}
+            </span>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginTop: -6 }}>
+            Devolvidos pelo SDR ("Fechou com concorrente" ou "Não tem interesse no momento"). Reative quando for a hora de tentar de novo.
+          </p>
+          {requeuedLeads.map(d => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
+                <div className="muted" style={{ fontSize: 11.5 }}>{d.company} · {getLostReasonLabel(d.lostReason)}</div>
+              </div>
+              <button
+                className="btn btn-outline btn-sm"
+                disabled={reactivating === d.id}
+                onClick={() => reactivateLead(d.id)}
+              >
+                <Icon name="RotateCcw" size={13} />
+                {reactivating === d.id ? 'Reativando...' : 'Reativar'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Monitoramento dos SDRs — cadência do dia de cada um */}
+      <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0 }}>Cadência dos SDRs hoje</h3>
+          <span className="muted" style={{ fontSize: 12 }}>para calibrar o envio de novos leads</span>
+        </div>
+        {sdrMonitor.length === 0 ? (
+          <div className="muted" style={{ textAlign: 'center', padding: '20px 0', fontSize: 13 }}>Nenhum SDR ativo encontrado.</div>
+        ) : (
+          sdrMonitor.map(({ sdr, leads, total, done, pct, developed, devPct }) => (
+            <div key={sdr.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <Av initials={sdr.initials ?? (sdr.name ?? '?').slice(0, 2).toUpperCase()} color={sdr.color ?? '#1A6B1A'} size={30} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{sdr.name}</div>
+                <div className="muted" style={{ fontSize: 11.5 }}>
+                  {leads} lead{leads !== 1 ? 's' : ''} em cadência · {developed} desenvolvido{developed !== 1 ? 's' : ''} ({devPct}%)
+                </div>
+              </div>
+              <div style={{ width: 130 }}>
+                <div className="prog" style={{ height: 8 }}>
+                  <div className="fill" style={{ width: pct + '%', background: pct >= 75 ? 'var(--primary)' : pct >= 50 ? '#F59E0B' : '#EF4444' }} />
+                </div>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, minWidth: 70, textAlign: 'right', color: pct >= 75 ? 'var(--primary)' : pct >= 50 ? '#B45309' : '#B91C1C' }}>
+                {done}/{total} · {pct}%
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {assigningDeal && (
+        <AssignSdrModal
+          deal={assigningDeal}
+          sdrs={sdrs}
+          workloadBySdr={sdrWorkloads}
+          onConfirm={handleAssignSdr}
+          onCancel={() => setAssigningDeal(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,0 +1,29 @@
+{
+  "projects": {
+    "default": "wizmart-crm",
+    "prod": "wizmart-crm",
+    "homolog": "codifyx7"
+  },
+  "targets": {
+    "wizmart-crm": {
+      "hosting": {
+        "wizmart-crm-app": [
+          "wizmart-crm"
+        ]
+      },
+      "database": {
+        "main": [
+          "wizmart-crm-default-rtdb"
+        ]
+      }
+    },
+    "codifyx7": {
+      "hosting": {
+        "wizmart-crm-app": [
+          "crm-codifyx"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

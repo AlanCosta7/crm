@@ -11,28 +11,35 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import anime from 'animejs';
-import { doc, addDoc, collection, updateDoc } from 'firebase/firestore';
+import { doc, collection, writeBatch, where } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
 import type { Deal, Funnel, FunnelStage, Seller, SettingUser } from '../../types/crm';
 import { Av } from '../../components/ui/Av';
 import { Icon } from '../../components/ui/Icon';
-import { DealSidebar } from '../deals/DealSidebar';
-import { fmtCurrency, sellerById, PRODUCT_COLOR } from '../../utils/crmFormat';
+import { fmtCurrency, sellerById, PRODUCT_COLOR, ROLE_LABEL } from '../../utils/crmFormat';
 import {
   sortedStages,
   shouldTriggerConvergence,
   shouldRequireHandoff,
   visibleFunnelTypes,
   canMoveDeal,
+  canConfirmHandoff,
   type HandoffFormData,
 } from '../../utils/funnelUtils';
 import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
 import { HandoffModal } from './HandoffModal';
 import { ConnectionTypeModal, type ConnectionTypeFormData } from './ConnectionTypeModal';
+import { LostReasonModal } from '../deals/LostReasonModal';
+import { getLostReasonLabel, requeuesToBdr } from '../../utils/lostReasonUtils';
+import type { LostReasonId } from '../../types/crm';
 import { matchesProductId } from '../../utils/productScope';
+import { computeParticipantIds, computeResponsibleId } from '../../utils/dealParticipants';
+import { dealParticipantConstraint } from '../../utils/dealQueryScope';
+import { getLastActivityAt, isCardExpired } from '../../utils/cardExpirationUtils';
 
 // ── Tipos locais ──────────────────────────────────────────────────────────────
 
@@ -76,11 +83,23 @@ interface KCardProps {
   onDragEnd: () => void;
   sellers: Seller[];
   stageName?: string;
+  /** Presente apenas para papéis operacionais — alterna a estrela de favorito */
+  onToggleFavorite?: (d: Deal) => void;
+  /** 21+ dias sem atividade concluída (Observações do cliente, jul/2026) */
+  expired?: boolean;
+  /** uid de quem está olhando — usado só pro badge "Repassado" */
+  currentUid?: string;
 }
 
-function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageName }: KCardProps) {
-  const s = sellerById(sellers, deal.assignedRepId || deal.assignedSdrId || deal.owner);
+function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageName, onToggleFavorite, expired, currentUid }: KCardProps) {
+  // responsibleId é gravado pela CF onDealParticipantsChanged; fallback ao cálculo
+  // inline só para o intervalo entre o backfill e a 1ª sincronização de deals antigos.
+  const s = sellerById(sellers, deal.responsibleId || deal.assignedRepId || deal.assignedSdrId || deal.owner);
   const prodColor = deal.productId ? PRODUCT_COLOR[deal.productId]?.primary : '#1A6B1A';
+  // Card aparece porque quem está olhando participa (assinou em algum momento),
+  // mas não é mais quem está com o bastão — evita achar que precisa agir nele.
+  const isPassedAlong = !!currentUid && currentUid !== deal.responsibleId
+    && (deal.participantIds || []).includes(currentUid);
 
   return (
     <div
@@ -96,12 +115,17 @@ function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageN
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: prodColor, borderRadius: '4px 0 0 4px' }} />
 
       {/* Badge de status / porte do cliente */}
-      {deal.status === 'converted' && (
+      {expired && (
+        <span className="badge" title="21+ dias sem atividade concluída" style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, background: '#FEE2E2', color: '#B91C1C', border: '1px solid #FCA5A5' }}>
+          ⏰ Vencido
+        </span>
+      )}
+      {!expired && deal.status === 'converted' && (
         <span className="badge" style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, background: '#F59E0B22', color: '#B45309', border: '1px solid #F59E0B44' }}>
           Convertido
         </span>
       )}
-      {deal.clientSize && deal.status !== 'converted' && (
+      {!expired && deal.clientSize && deal.status !== 'converted' && (
         <span className="badge" style={{
           position: 'absolute', top: 8, right: 8, fontSize: 10,
           background: deal.clientSize === 'small' ? '#FAF2EC' : deal.clientSize === 'medium' ? '#FEF3C7' : '#EFF6FF',
@@ -112,7 +136,19 @@ function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageN
         </span>
       )}
 
-      <div className="knm" style={{ paddingRight: (deal.status === 'converted' || deal.clientSize) ? 75 : 0 }}>{deal.name}</div>
+      <div className="knm" style={{ paddingRight: (deal.status === 'converted' || deal.clientSize) ? 75 : 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+        {(onToggleFavorite || deal.isFavorite) && (
+          <button
+            onClick={e => { e.stopPropagation(); onToggleFavorite?.(deal); }}
+            title={onToggleFavorite ? (deal.isFavorite ? 'Remover dos favoritos' : 'Marcar como lead de grande potencial') : 'Lead de grande potencial'}
+            aria-label="Favoritar lead"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: onToggleFavorite ? 'pointer' : 'default', display: 'inline-flex', flexShrink: 0 }}
+          >
+            <Icon name="Star" size={13} color={deal.isFavorite ? '#F59E0B' : '#C4CBD4'} fill={deal.isFavorite ? '#F59E0B' : 'none'} />
+          </button>
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{deal.name}</span>
+      </div>
 
       <div className="krow">
         <Icon name="Building2" size={13} />
@@ -131,19 +167,28 @@ function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageN
           {fmtCurrency(deal.value)}
         </span>
         {deal.due && deal.due !== '—' && deal.due !== '' && (
-          <div className="krow" style={{ margin: 0, gap: 4, flexShrink: 0, whiteSpace: 'nowrap' }}>
-            <Icon name="Calendar" size={13} />
-            <span style={{ fontSize: 11.5 }}>{deal.due}</span>
+          <div className="krow" style={{ margin: 0, gap: 4, flexShrink: 1, minWidth: 0, whiteSpace: 'nowrap' }}>
+            <Icon name="Calendar" size={13} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis' }}>{deal.due}</span>
           </div>
         )}
       </div>
 
       <div className="kfoot">
-        <div className="row" style={{ gap: 6 }}>
+        <div className="row" style={{ gap: 6, minWidth: 0 }}>
           <Av initials={s.initials} color={s.color} size={22} />
-          <span style={{ fontSize: 11.5, color: 'var(--text-2)', fontWeight: 700 }}>
+          <span style={{ fontSize: 11.5, color: 'var(--text-2)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {s.name.split(' ')[0]}
           </span>
+          {isPassedAlong && (
+            <span
+              className="badge"
+              title="Você participou deste card, mas não é mais o responsável atual"
+              style={{ fontSize: 9.5, height: 16, padding: '0 5px', background: 'var(--bg-2)', color: 'var(--text-2)', border: '1px solid var(--border)', flexShrink: 0 }}
+            >
+              Repassado
+            </span>
+          )}
         </div>
         {deal.tasks && <TaskDots tasks={deal.tasks} />}
       </div>
@@ -171,7 +216,7 @@ function DealsTable({ deals, onOpen, sellers, stages }: DealsTableProps) {
         </thead>
         <tbody>
           {deals.map((d, i) => {
-            const s = sellerById(sellers, d.assignedRepId || d.assignedSdrId || d.owner);
+            const s = sellerById(sellers, d.responsibleId || d.assignedRepId || d.assignedSdrId || d.owner);
             const prodColor = d.productId ? PRODUCT_COLOR[d.productId]?.primary : '#1A6B1A';
             return (
               <tr key={d.id} className={i % 2 ? 'alt' : ''}>
@@ -212,6 +257,7 @@ function DealsTable({ deals, onOpen, sellers, stages }: DealsTableProps) {
 // ── PipelinePage principal ────────────────────────────────────────────────────
 export function PipelinePage() {
   const { user }     = useAuthStore();
+  const navigate     = useNavigate();
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
   const role = user?.role ?? 'viewer';
@@ -221,10 +267,16 @@ export function PipelinePage() {
   const [selectedFunnel, setSelectedFunnel] = useState<string>('');
   const [draggedDeal,   setDraggedDeal]   = useState<Deal | null>(null);
   const [activeDrop,    setActiveDrop]    = useState<string | null>(null);
-  const [selectedDeal,  setSelectedDeal]  = useState<Deal | null>(null);
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
+  // Filtro "Todos" / "Meus Cards" / colega específico — só relevante pra quem
+  // tem leitura restrita a participantes (bdr/sdr/rep); manager/viewer/design
+  // já veem tudo e não precisam desse seletor. Valor é 'all', 'mine' ou o uid
+  // do colega selecionado.
+  const [dealScopeSelection, setDealScopeSelection] = useState<string>('mine');
   const [showNewDeal,   setShowNewDeal]   = useState(false);
   const [pendingDrop,   setPendingDrop]   = useState<PendingDrop | null>(null);
   const [connectionDrop, setConnectionDrop] = useState<{ deal: Deal; targetStage: FunnelStage } | null>(null);
+  const [lostReasonDrop, setLostReasonDrop] = useState<{ deal: Deal; targetStage: FunnelStage } | null>(null);
   const [toasts,        setToasts]        = useState<ToastItem[]>([]);
 
   // Campos do formulário de Novo Negócio
@@ -233,14 +285,57 @@ export function PipelinePage() {
   const [ndValue,   setNdValue]  = useState('');
   const [ndStage,   setNdStage]  = useState('');
   const [ndDue,     setNdDue]    = useState('');
+  // Porte estimado (Fase D3) — só o BDR vê esse campo na criação; opcional,
+  // default 'M' se deixado em branco (não força o BDR a pesquisar antes de criar).
+  const [ndSize,    setNdSize]   = useState<'' | 'P' | 'M' | 'G'>('');
   const [ndSaving,  setNdSaving] = useState(false);
+
+  // Papéis com leitura restrita a participantes (bate com canSeeAllDeals nas
+  // rules) — só eles precisam do toggle "Meus Cards / Cards de Outro Ator".
+  const showDealScopeToggle = !['master', 'manager', 'viewer', 'design'].includes(role);
+
+  const dealScopeTargetUid = dealScopeSelection === 'all' ? '' : dealScopeSelection === 'mine' ? (user?.uid || '') : dealScopeSelection;
+  const dealScopeConstraints = useMemo(() => {
+    const base = dealParticipantConstraint(user);
+    if (!showDealScopeToggle || !dealScopeTargetUid) return base;
+    return [...base, where('responsibleId', '==', dealScopeTargetUid)];
+  }, [user, showDealScopeToggle, dealScopeTargetUid]);
+  // Firestore constraints são recriados a cada render — o hook só reassina
+  // quando `queryConstraints.length` muda, então o alvo (all → sem filtro,
+  // mine → uid X, colega → uid Y) precisa dessa chave separada pra forçar a
+  // reassinatura.
+  const dealScopeKey = `${dealScopeSelection}:${dealScopeTargetUid}`;
 
   // Dados Firestore
   const { data: funnels }  = useFirestoreCollection<Funnel>('funnels');
-  const { data: deals }    = useFirestoreCollection<Deal>('deals');
+  const { data: deals }    = useFirestoreCollection<Deal>('deals', dealScopeConstraints, dealScopeKey);
+  // Conjunto estável (sem filtro de responsibleId) só pra montar a lista de
+  // colegas do seletor "Cards de Outro Ator" — se usasse `deals` acima, a
+  // lista encolheria pra só quem já está selecionado no filtro atual.
+  const { data: baseScopedDeals } = useFirestoreCollection<Deal>(
+    'deals',
+    showDealScopeToggle ? dealParticipantConstraint(user) : [],
+  );
   const { data: sellers }  = useFirestoreCollection<Seller>('sellers');
   const { data: allUsers } = useFirestoreCollection<SettingUser>('users');
+  const { data: activities } = useFirestoreCollection<any>('activities');
   const { updateDocument, addDocument } = useFirestoreMutations('deals');
+  const { addDocument: addActivity } = useFirestoreMutations('activities');
+
+  // Colegas com quem o usuário já dividiu algum card — única fonte do
+  // seletor "Cards de Outro Ator" (decisão confirmada: nunca lista o time
+  // inteiro, só quem já cruzou com ele em algum negócio).
+  const colleagueOptions = useMemo(() => {
+    if (!showDealScopeToggle || !user?.uid) return [] as SettingUser[];
+    const ids = new Set<string>();
+    baseScopedDeals.forEach(d => (d.participantIds || []).forEach(pid => {
+      if (pid && pid !== user.uid) ids.add(pid);
+    }));
+    return [...ids]
+      .map(id => allUsers.find(u => u.id === id))
+      .filter((u): u is SettingUser => Boolean(u))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [baseScopedDeals, allUsers, user, showDealScopeToggle]);
 
   // Filtrar funis pelo role e produto
   const allowedTypes = visibleFunnelTypes(role);
@@ -263,15 +358,36 @@ export function PipelinePage() {
   const activeFunnel = visibleFunnels.find(f => f.id === selectedFunnel);
   const stages = activeFunnel ? sortedStages(activeFunnel) : [];
 
-  // Filtra deals pelo funil ativo e produto
+  // Filtra deals pelo funil ativo, produto e favoritos
   const funnelDeals = useMemo(
     () => deals.filter(d => {
       if (activeFunnel && d.funnelId && d.funnelId !== activeFunnel.id) return false;
       if (!matchesProductId(productScope, d.productId || 'wizmart')) return false;
+      if (onlyFavorites && !d.isFavorite) return false;
       return true;
     }),
-    [deals, activeFunnel, productScope],
+    [deals, activeFunnel, productScope, onlyFavorites],
   );
+
+  const toggleFavorite = async (deal: Deal) => {
+    try {
+      await updateDocument(deal.id, { isFavorite: !deal.isFavorite, updatedAt: new Date() });
+    } catch (err) {
+      console.error('[PipelinePage] Erro ao favoritar deal:', err);
+      triggerToast({ pts: 0, label: 'Erro', custom: '⚠️ Não foi possível atualizar o favorito.' });
+    }
+  };
+
+  // Vencimento do card (Observações do cliente, jul/2026): 21 dias sem
+  // atividade concluída. Calculado uma vez para todos os deals visíveis.
+  const expiredDealIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const d of funnelDeals) {
+      const lastActivityAt = getLastActivityAt(activities, d.id);
+      if (isCardExpired(d, lastActivityAt)) ids.add(d.id);
+    }
+    return ids;
+  }, [funnelDeals, activities]);
 
   const colDeals  = (sid: string) => funnelDeals.filter(d => d.stage === sid);
   const colTotal  = (sid: string) => colDeals(sid).reduce((a, d) => a + d.value, 0);
@@ -298,8 +414,26 @@ export function PipelinePage() {
       return;
     }
 
+    // Estágio terminal "Perdeu" exige motivo estruturado (Observações do
+    // cliente, jul/2026) — nunca marca perda sem passar pelo modal.
+    if (stage.isLost) {
+      setLostReasonDrop({ deal: draggedDeal, targetStage: stage });
+      setDraggedDeal(null);
+      setActiveDrop(null);
+      return;
+    }
+
     const needsHandoff  = shouldRequireHandoff(stage, draggedDeal);
     const willConverge  = shouldTriggerConvergence(draggedDeal, stage, activeFunnel.type);
+
+    // Passagem de bastão é exclusiva de SDR/gestão (mesma regra das security rules).
+    // BDR passa leads para o SDR, não para o Rep.
+    if (needsHandoff && !canConfirmHandoff(role)) {
+      triggerToast({ pts: 0, label: 'Sem permissão', custom: '🚫 A passagem de bastão é feita pelo SDR responsável (ou gestão).' });
+      setDraggedDeal(null);
+      setActiveDrop(null);
+      return;
+    }
 
     if (needsHandoff || willConverge) {
       // Guarda o drop pendente e aguarda confirmação (HandoffModal ou confirm)
@@ -330,35 +464,51 @@ export function PipelinePage() {
     }
   };
 
+  const onLostReasonConfirm = async (reasonId: LostReasonId, note: string) => {
+    if (!lostReasonDrop || !user?.uid) return;
+    const { deal, targetStage } = lostReasonDrop;
+    const requeue = requeuesToBdr(reasonId);
+
+    const patch: Record<string, any> = {
+      stage: targetStage.id,
+      status: 'lost',
+      lostReason: reasonId,
+      updatedAt: new Date(),
+    };
+    if (note) patch.lostReasonNote = note;
+    if (requeue) {
+      patch.assignedSdrId = null;
+      patch.requeuedForBdr = true;
+      patch.requeuedAt = new Date();
+    }
+
+    await updateDocument(deal.id, patch);
+
+    const label = getLostReasonLabel(reasonId);
+    await addActivity({
+      type: 'note',
+      dealId: deal.id,
+      userId: user.uid,
+      text: `Negócio perdido — ${label}${requeue ? ' (devolvido ao BDR para nova tentativa)' : ''}`,
+      status: 'completed',
+      cadenceType: 'manual',
+      coinsAwarded: 0,
+      wasOnTime: true,
+      productId: deal.productId || activeFunnel?.productId || 'wizmart',
+    });
+
+    triggerToast({ pts: 0, label: 'Negócio perdido', custom: requeue ? `↩️ ${deal.name} devolvido ao BDR` : `❌ ${deal.name} marcado como perdido` });
+    setLostReasonDrop(null);
+  };
+
   const commitDrop = async (deal: Deal, stage: FunnelStage) => {
     try {
-      // ── v3: cohortKeys automáticos por estágio ────────────────────────────
-      const nowMonth = new Date().toISOString().slice(0, 7); // ex: '2026-06'
-      const cohortPatch: Record<string, string | number> = {};
-      // WizMart: visita_agendada | Smart Café: conectado (quando connectionType é definido)
-      const isVisitStage = stage.id === 'visita_agendada' ||
-        (stage.id === 'conectado' && activeFunnel?.productId === 'smart_cafe');
-      if (isVisitStage && !deal.cohortKeys?.visitScheduledMonth) {
-        cohortPatch.visitScheduledMonth = nowMonth;
-      }
-      // WizMart: inaugurado | Smart Café: instalacao_realizada
-      const isWonStage = stage.id === 'inaugurado' || stage.id === 'instalacao_realizada';
-      if (isWonStage && !deal.cohortKeys?.conquestMonth) {
-        cohortPatch.conquestMonth = nowMonth;
-      }
-      // prospectsSharedMonth: setado quando BDR transfere para SDR
-      if (stage.id === 'prospeccao' && deal.bdrId && deal.assignedSdrId && !deal.cohortKeys?.prospectsSharedMonth) {
-        cohortPatch.prospectsSharedMonth = nowMonth;
-      }
-
+      // cohortKeys são gravados EXCLUSIVAMENTE pela Cloud Function onDealStageChanged
+      // (as security rules negam a escrita de cohortKeys pelo cliente — escrever aqui
+      // fazia o move inteiro ser rejeitado com permission-denied).
+      // Estágios "Perdeu" nunca chegam aqui — são interceptados em onDrop
+      // e exigem o LostReasonModal (motivo estruturado obrigatório).
       const updatePayload: Record<string, any> = { stage: stage.id, updatedAt: new Date() };
-      // Estágio terminal "Perdeu" → marca status lost
-      if (stage.isLost) {
-        updatePayload['status'] = 'lost';
-      }
-      if (Object.keys(cohortPatch).length > 0) {
-        updatePayload['cohortKeys'] = { ...(deal.cohortKeys ?? {}), ...cohortPatch };
-      }
 
       await updateDocument(deal.id, updatePayload);
 
@@ -373,6 +523,7 @@ export function PipelinePage() {
       }
     } catch (err) {
       console.error('[PipelinePage] Erro ao mover deal:', err);
+      triggerToast({ pts: 0, label: 'Erro ao mover', custom: `⚠️ Não foi possível mover "${deal.name}". Tente novamente ou contate o suporte.` });
     } finally {
       setDraggedDeal(null);
       setActiveDrop(null);
@@ -383,8 +534,15 @@ export function PipelinePage() {
     if (!pendingDrop || !user?.tenantId) return;
     const { deal, targetStage, willConverge } = pendingDrop;
 
+    // Batch atômico: ou o deal move E o handoff é criado, ou nada acontece.
+    // (Antes eram 2 escritas separadas — se a 2ª falhasse, o deal ficava
+    // meio migrado, com handoffStatus 'pending' e nenhum handoff para o Rep.)
+    const batch = writeBatch(db);
+    const dealRef = doc(db, 'tenants', user.tenantId, 'deals', deal.id);
+    const handoffRef = doc(collection(db, 'tenants', user.tenantId, 'handoffs'));
+
     // 1. Mover o deal para o novo estágio
-    await updateDocument(deal.id, {
+    batch.update(dealRef, {
       stage: targetStage.id,
       handoffStatus: 'pending',
       priorityChannel: form.priorityChannel,
@@ -396,8 +554,7 @@ export function PipelinePage() {
     });
 
     // 2. Criar documento de handoff na coleção
-    const handoffsCol = collection(db, 'tenants', user.tenantId, 'handoffs');
-    await addDoc(handoffsCol, {
+    batch.set(handoffRef, {
       dealId: deal.id,
       productId: deal.productId || activeFunnel?.productId || 'wizmart',
       fromSdrId: user.uid,
@@ -412,10 +569,11 @@ export function PipelinePage() {
 
     // 3. Se convergência, marcar deal original e criar espelho no Hunter
     if (willConverge) {
-      const dealsCol = collection(db, 'tenants', user.tenantId, 'deals');
-      const hunterDeal = await addDoc(dealsCol, {
-        ...deal,
-        id: undefined,
+      // `id` não pode ir no payload (o SDK rejeita valores undefined)
+      const { id: _dealId, ...dealData } = deal;
+      const hunterRef = doc(collection(db, 'tenants', user.tenantId, 'deals'));
+      batch.set(hunterRef, {
+        ...dealData,
         funnelType: 'hunter',
         funnelId: funnels.find(f => f.type === 'hunter' && f.productId === deal.productId)?.id || '',
         stage: 'visita_ag_h',
@@ -425,17 +583,20 @@ export function PipelinePage() {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-
-      // Atualizar deal original com referência ao espelho Hunter
-      const dealRef = doc(db, 'tenants', user.tenantId, 'deals', deal.id);
-      await updateDoc(dealRef, {
+      batch.update(dealRef, {
         status: 'converted',
-        linkedHunterDealId: hunterDeal.id,
+        linkedHunterDealId: hunterRef.id,
         updatedAt: new Date(),
       });
+    }
 
+    // Erros propagam para o HandoffModal, que exibe a mensagem ao usuário.
+    await batch.commit();
+
+    if (willConverge) {
       triggerToast({ pts: 10, label: 'Convergência', custom: '🎯 Deal espelho criado no funil Hunter!' });
     }
+    triggerToast({ pts: 0, label: 'Handoff enviado', custom: `🤝 ${deal.name} aguardando aceite do representante.` });
 
     setPendingDrop(null);
   };
@@ -443,7 +604,7 @@ export function PipelinePage() {
   // ── Novo Negócio ─────────────────────────────────────────────────────────────
 
   const openNewDeal = (stageId?: string) => {
-    setNdName(''); setNdCompany(''); setNdValue(''); setNdDue('');
+    setNdName(''); setNdCompany(''); setNdValue(''); setNdDue(''); setNdSize('');
     setNdStage(stageId || stages[0]?.id || '');
     setShowNewDeal(true);
   };
@@ -468,14 +629,27 @@ export function PipelinePage() {
       };
 
       if (role === 'bdr' && user?.uid) {
+        // A atividade do BDR vai primeiro para o SDR (Observações do cliente,
+        // jul/2026): o lead entra na fila de distribuição do motor de cadência
+        // (status 'in_queue') e o dailyCadenceEngine o atribui a um SDR às 7h.
         dealData.bdrId = user.uid;
+        dealData.status = 'in_queue';
+        // Porte estimado (Fase D3) — opcional; sem seleção, fica sem o campo
+        // (efetivamente 'M' pra fins de cálculo, sem fingir uma classificação real).
+        if (ndSize) dealData.companySizeEstimate = ndSize;
       }
       if (role === 'sdr' && user?.uid) {
         dealData.assignedSdrId = user.uid;
       }
 
+      dealData.participantIds = computeParticipantIds(dealData);
+      dealData.responsibleId = computeResponsibleId(dealData);
+
       await addDocument(dealData);
       setShowNewDeal(false);
+      if (role === 'bdr') {
+        triggerToast({ pts: 0, label: 'Lead na fila', custom: '📥 Lead criado — será distribuído a um SDR na próxima cadência (7h).' });
+      }
     } catch (err) {
       console.error('[PipelinePage] Erro ao criar deal:', err);
     } finally {
@@ -556,8 +730,27 @@ export function PipelinePage() {
 
         {/* Controles — fixos à direita */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <button className="btn btn-outline btn-sm">
-            <Icon name="SlidersHorizontal" size={15} />Filtrar
+          {showDealScopeToggle && (
+            <select
+              className="input"
+              style={{ width: 200 }}
+              value={dealScopeSelection}
+              onChange={e => setDealScopeSelection(e.target.value)}
+              title="Cards em que você é o responsável, ou de outra pessoa com quem já dividiu um card"
+            >
+              <option value="all">Todos</option>
+              <option value="mine">Meus Cards</option>
+              {colleagueOptions.map(u => (
+                <option key={u.id} value={u.id}>{u.name} — {ROLE_LABEL[u.role] || u.role}</option>
+              ))}
+            </select>
+          )}
+          <button
+            className={`btn btn-sm ${onlyFavorites ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setOnlyFavorites(v => !v)}
+            title="Mostrar apenas leads de grande potencial"
+          >
+            <Icon name="Star" size={15} fill={onlyFavorites ? '#fff' : 'none'} />Favoritos
           </button>
           <div className="seg">
             <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}>Kanban</button>
@@ -634,12 +827,15 @@ export function PipelinePage() {
                         <KCard
                           key={d.id}
                           deal={d}
-                          onOpen={deal => setSelectedDeal(deal)}
+                          onOpen={deal => navigate(`/lead/${deal.id}`)}
                           dragging={draggedDeal?.id === d.id}
                           onDragStart={canMoveDeal(role) ? onDragStart : () => {}}
                           onDragEnd={onDragEnd}
                           sellers={sellers}
                           stageName={st.name}
+                          onToggleFavorite={canMoveDeal(role) ? toggleFavorite : undefined}
+                          expired={expiredDealIds.has(d.id)}
+                          currentUid={user?.uid}
                         />
                       ))
                     )}
@@ -651,7 +847,7 @@ export function PipelinePage() {
         )
       ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
-          <DealsTable deals={funnelDeals} onOpen={deal => setSelectedDeal(deal)} sellers={sellers} stages={stages} />
+          <DealsTable deals={funnelDeals} onOpen={deal => navigate(`/lead/${deal.id}`)} sellers={sellers} stages={stages} />
         </div>
       )}
 
@@ -685,6 +881,15 @@ export function PipelinePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* LostReasonModal — motivo estruturado ao soltar em estágio "Perdeu" */}
+      {lostReasonDrop && (
+        <LostReasonModal
+          deal={lostReasonDrop.deal}
+          onClose={() => setLostReasonDrop(null)}
+          onConfirm={onLostReasonConfirm}
+        />
       )}
 
       {/* HandoffModal — exibido quando o estágio exige handoff */}
@@ -740,6 +945,20 @@ export function PipelinePage() {
                     {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
+                {role === 'bdr' && (
+                  <div className="field" style={{ margin: 0 }}>
+                    <div className="fl">Porte estimado da empresa</div>
+                    <select className="input" value={ndSize} onChange={e => setNdSize(e.target.value as typeof ndSize)}>
+                      <option value="">Não sei ainda</option>
+                      <option value="P">Pequeno</option>
+                      <option value="M">Médio</option>
+                      <option value="G">Grande</option>
+                    </select>
+                    <p className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      Chute inicial pra ajudar a distribuir os leads de forma equilibrada entre os SDRs. O SDR pode corrigir depois de pesquisar.
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="modal-ft">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowNewDeal(false)}>Cancelar</button>
@@ -751,15 +970,6 @@ export function PipelinePage() {
             </form>
           </div>
         </div>
-      )}
-
-      {/* DealSidebar */}
-      {selectedDeal && (
-        <DealSidebar
-          dealId={selectedDeal.id}
-          onClose={() => setSelectedDeal(null)}
-          onPoints={g => triggerToast({ pts: g.pts, label: g.title || g.label || 'Tarefa', custom: g.custom })}
-        />
       )}
 
       {/* Toasts */}

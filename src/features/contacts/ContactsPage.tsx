@@ -3,6 +3,7 @@
  * O filtro de produto lê productId do uiStore e filtra contacts.productIds[].
  */
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
 import type { Contact, Deal, Stage, Seller } from '../../types/crm';
 import { Av } from '../../components/ui/Av';
@@ -11,6 +12,7 @@ import { fmtCurrency, sellerById, stageById } from '../../utils/crmFormat';
 import { useUIStore } from '../../stores/uiStore';
 import { useAuthStore } from '../../stores/authStore';
 import { matchesProductId, matchesProductIds, productIdsForNewEntity } from '../../utils/productScope';
+import { dealParticipantConstraint } from '../../utils/dealQueryScope';
 
 export function ContactsPage() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -23,12 +25,15 @@ export function ContactsPage() {
   
   // Triggers do Firestore enlaçados com listeners em tempo real (Fase 2)
   const { data: contacts, loading } = useFirestoreCollection<Contact>('contacts');
-  const { data: deals } = useFirestoreCollection<Deal>('deals');
+  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
   const { data: stages } = useFirestoreCollection<Stage>('stages');
   const { data: sellers } = useFirestoreCollection<Seller>('sellers');
-  const { addDocument } = useFirestoreMutations('contacts');
+  const { addDocument, updateDocument } = useFirestoreMutations('contacts');
+  const navigate = useNavigate();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Contato em edição — null = modal em modo criação
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [newName, setNewName] = useState('');
   const [newCompany, setNewCompany] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -36,33 +41,58 @@ export function ContactsPage() {
   const [newWhats, setNewWhats] = useState('');
   const [newRole, setNewRole] = useState('Diretor de Compras');
 
+  const openEditContact = (c: Contact) => {
+    setEditingContact(c);
+    setNewName(c.name);
+    setNewCompany(c.company);
+    setNewEmail(c.email ?? '');
+    setNewPhone(c.phone ?? '');
+    setNewWhats(c.whats ?? '');
+    setNewRole(c.role ?? 'Diretor de Compras');
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingContact(null);
+    setNewName(''); setNewCompany(''); setNewEmail(''); setNewPhone(''); setNewWhats('');
+  };
+
   const handleCreateContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName || !newCompany) return;
 
-    const newContactData = {
-      name: newName,
-      company: newCompany,
-      email: newEmail,
-      phone: newPhone,
-      whats: newWhats || newPhone,
-      role: newRole,
-      owner: user?.uid || '',
-      productIds: productIdsForNewEntity(productScope, user),
-      last: 'agora',
-      tags: ['Novo'],
-      deals: 0,
-    };
-
     try {
-      await addDocument(newContactData);
-      setIsModalOpen(false);
-      // Limpa formulário
-      setNewName('');
-      setNewCompany('');
-      setNewEmail('');
-      setNewPhone('');
-      setNewWhats('');
+      if (editingContact) {
+        // Modo edição — atualiza o contato existente
+        const patch = {
+          name: newName,
+          company: newCompany,
+          email: newEmail,
+          phone: newPhone,
+          whats: newWhats || newPhone,
+          role: newRole,
+          updatedAt: new Date(),
+        };
+        await updateDocument(editingContact.id, patch);
+        // Reflete a edição no painel de detalhe aberto
+        setSelectedContact(prev => (prev && prev.id === editingContact.id ? { ...prev, ...patch } : prev));
+      } else {
+        await addDocument({
+          name: newName,
+          company: newCompany,
+          email: newEmail,
+          phone: newPhone,
+          whats: newWhats || newPhone,
+          role: newRole,
+          owner: user?.uid || '',
+          productIds: productIdsForNewEntity(productScope, user),
+          last: 'agora',
+          tags: ['Novo'],
+          deals: 0,
+        });
+      }
+      closeModal();
     } catch (err) {
       console.error(err);
     }
@@ -159,18 +189,23 @@ export function ContactsPage() {
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-              <button className="btn btn-primary" style={{ justifyContent: 'center' }}>
+              <button
+                className="btn btn-primary"
+                style={{ justifyContent: 'center' }}
+                onClick={() => navigate('/pipeline')}
+                title="Criar um negócio para este contato no Pipeline"
+              >
                 <Icon name="Plus" size={16} />
                 Novo Negócio
               </button>
-              <div className="row" style={{ gap: 8 }}>
-                <button className="btn btn-outline btn-sm" style={{ flex: 1, justifyContent: 'center' }}>
-                  Nova Atividade
-                </button>
-                <button className="btn btn-outline btn-sm" style={{ flex: 1, justifyContent: 'center' }}>
-                  Editar
-                </button>
-              </div>
+              <button
+                className="btn btn-outline btn-sm"
+                style={{ justifyContent: 'center' }}
+                onClick={() => openEditContact(c)}
+              >
+                <Icon name="Pencil" size={14} />
+                Editar Contato
+              </button>
             </div>
           </div>
 
@@ -205,11 +240,7 @@ export function ContactsPage() {
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-          <button className="btn btn-outline btn-sm">
-            <Icon name="SlidersHorizontal" size={15} />
-            Filtrar
-          </button>
-          <button className="btn btn-outline btn-sm">
+          <button className="btn btn-outline btn-sm" disabled title="Importação em lote — em breve" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
             <Icon name="Upload" size={15} />
             Importar
           </button>
@@ -306,35 +337,17 @@ export function ContactsPage() {
           <span className="muted" style={{ fontSize: 12.5 }}>
             1–{filteredContacts.length} de {filteredContacts.length} contatos
           </span>
-          <div className="row" style={{ gap: 6 }}>
-            <button className="btn btn-ghost btn-sm" disabled>
-              <Icon name="ChevronLeft" size={16} />
-              Anterior
-            </button>
-            {['1'].map(p => (
-              <button
-                key={p}
-                className="btn btn-sm btn-primary"
-                style={{ minWidth: 32, justifyContent: 'center', padding: 0 }}
-              >
-                {p}
-              </button>
-            ))}
-            <button className="btn btn-ghost btn-sm" disabled>
-              Próxima
-              <Icon name="ChevronRight" size={16} />
-            </button>
-          </div>
+          {/* Todos os contatos são exibidos numa única lista — sem paginação fake */}
         </div>
       </div>
 
-      {/* Modal - Novo Contato */}
+      {/* Modal - Novo Contato / Editar Contato */}
       {isModalOpen && (
-        <div className="modal-ov" onClick={() => setIsModalOpen(false)}>
+        <div className="modal-ov" onClick={closeModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-hd">
-              <h3 style={{ fontSize: 15, fontWeight: 600 }}>Cadastrar Novo Contato</h3>
-              <button className="icon-btn" onClick={() => setIsModalOpen(false)} aria-label="Fechar modal">
+              <h3 style={{ fontSize: 15, fontWeight: 600 }}>{editingContact ? 'Editar Contato' : 'Cadastrar Novo Contato'}</h3>
+              <button className="icon-btn" onClick={closeModal} aria-label="Fechar modal">
                 <Icon name="X" size={18} />
               </button>
             </div>
@@ -401,12 +414,12 @@ export function ContactsPage() {
                 </div>
               </div>
               <div className="modal-ft">
-                <button type="button" className="btn btn-ghost" onClick={() => setIsModalOpen(false)}>
+                <button type="button" className="btn btn-ghost" onClick={closeModal}>
                   Cancelar
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  <Icon name="Plus" size={16} />
-                  Cadastrar
+                  <Icon name={editingContact ? 'Check' : 'Plus'} size={16} />
+                  {editingContact ? 'Salvar' : 'Cadastrar'}
                 </button>
               </div>
             </form>

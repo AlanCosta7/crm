@@ -35,7 +35,7 @@ function getCurrentCycle(): string {
 }
 
 export const onActivityCompleted = onDocumentUpdated(
-  "tenants/{tenantId}/activities/{activityId}",
+  { document: "tenants/{tenantId}/activities/{activityId}", region: "southamerica-east1" },
   async (event) => {
     const before = event.data?.before.data();
     const after  = event.data?.after.data();

@@ -1,6 +1,7 @@
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { ServerValue } from "firebase-admin/database";
 
 /**
  * Cloud Function que reage a alteração de negócios e identifica quando foi GANHO.
@@ -10,7 +11,7 @@ import { FieldValue } from "firebase-admin/firestore";
 const WON_STAGES = ['inaugurado', 'instalacao_realizada'];
 
 export const onDealWon = onDocumentUpdated(
-  "tenants/{tenantId}/deals/{dealId}",
+  { document: "tenants/{tenantId}/deals/{dealId}", region: "southamerica-east1" },
   async (event) => {
     const beforeData = event.data?.before.data();
     const afterData = event.data?.after.data();
@@ -96,10 +97,10 @@ export const onDealWon = onDocumentUpdated(
         const liveKpisRef = rtdb.ref(`tenants/${tenantId}/live_kpis`);
         const productLiveKpisRef = rtdb.ref(`tenants/${tenantId}/live_kpis_by_product/${productId}`);
         const kpiUpdates = {
-          monthRevenue: admin.database.ServerValue.increment(afterData.value),
-          todayRevenue: admin.database.ServerValue.increment(afterData.value),
-          todayDeals: admin.database.ServerValue.increment(1),
-          updatedAt: admin.database.ServerValue.TIMESTAMP,
+          monthRevenue: ServerValue.increment(afterData.value),
+          todayRevenue: ServerValue.increment(afterData.value),
+          todayDeals: ServerValue.increment(1),
+          updatedAt: ServerValue.TIMESTAMP,
         };
         await liveKpisRef.update(kpiUpdates);
         await productLiveKpisRef.update(kpiUpdates);
