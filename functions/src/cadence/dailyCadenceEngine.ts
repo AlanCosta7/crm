@@ -4,14 +4,19 @@
  * Schedule: toda manhã às 7h BRT (dias úteis e fins de semana).
  * Trigger: pubsub schedule via Cloud Scheduler.
  *
- * Algoritmo por SDR ativo (REQUISITOS-V2.md §6 + Observações do cliente jul/2026):
+ * Algoritmo por SDR ativo (REQUISITOS-V2.md §6 + documento "Cadência Comercial
+ * SDRs do Dia 1 ao Dia 30", confirmado com o Alan em 27/08/2026):
  *  1. Busca a fila de ontem → calcula taxaConclusao
  *  2. novosCards = Math.floor(max × taxa) (1º dia → max; max configurável)
  *  3. Busca próximos N deals da fila BDR por RECÊNCIA (mais novo primeiro)
- *  4. Para cada deal novo: cria 4 activities (call, linkedin, whatsapp, email)
- *     e ancora `assignedAt` para a régua semanal
- *  4b. Follow-ups decrescentes p/ leads já atribuídos: semana 1 = 3 contatos,
- *      semana 2 = 2, semana 3 = 1 (configurável em settings/cadence)
+ *  4. Para cada deal novo: cria as activities do passo D0 da régua
+ *     (call, email, linkedin) e ancora `assignedAt` para os passos seguintes
+ *  4b. Passos tardios da régua (configurável em settings/cadence.sdr.steps,
+ *      padrão D+1, D+3, D+5, D+8, D+12, D+17, D+23, D+29) p/ leads já
+ *      atribuídos: cada um nasce no dia exato em que vence, olhando quantos
+ *      dias fazem desde `assignedAt`.
+ *      Deals em Standby (`standbyActive`) saem da régua automática — o
+ *      prospect respondeu e está em tratamento personalizado.
  *  5. Escreve `cadence_queues/{sdrId}/daily/{hoje}`
  *  6. Atualiza RTDB para refresh imediato na tela
  *
@@ -27,20 +32,14 @@ import {
   calcCompletionRate,
   getTodayBRT,
   getYesterdayBRT,
-  SDR_ACTIVITY_TYPES,
-  ACTIVITY_TYPE_CONFIG,
   normalizeCadenceConfig,
-  followUpForDay,
-  followUpChannel,
+  findCadenceStep,
   daysBetweenBRT,
   pickBalancedCandidates,
-  stepsForDayOffset,
-  periodTimeOnDay,
   type ActivityType,
   type CadenceCard,
   type CadenceConfig,
   type DailyQueue,
-  type SequenceStep,
 } from "./cadenceUtils";
 
 export const dailyCadenceEngine = onSchedule(
@@ -172,7 +171,6 @@ async function processSDR(
     type: ActivityType,
     cadenceType: string,
     dueAt: Date = todayStart,
-    sequenceOrder?: number,
   ) => {
     const actRef = db.collection(`tenants/${tenantId}/activities`).doc();
     batch.set(actRef, {
@@ -183,7 +181,6 @@ async function processSDR(
       status: "pending",
       scheduledAt: dueAt,
       dueAt,
-      ...(sequenceOrder !== undefined ? { sequenceOrder } : {}),
       coinsAwarded: 0,
       wasOnTime: false,
       overdueNotificationCount: 0,
@@ -195,14 +192,8 @@ async function processSDR(
     return actRef.id;
   };
 
-  // Sequência de contato configurada pelo admin (settings/cadence.sdr.sequence).
-  // Vazia = comportamento legado (os 4 canais no dia 0, sem período, dueAt = hoje 23:59).
-  const hasCustomSequence = config.sequence.length === SDR_ACTIVITY_TYPES.length;
-  const day0Steps: SequenceStep[] = hasCustomSequence
-    ? stepsForDayOffset(config.sequence, 0)
-    : SDR_ACTIVITY_TYPES.map(type => ({ type, dayOffset: 0, period: "manha" as const }));
-  const sequenceOrderOf = (type: ActivityType): number =>
-    hasCustomSequence ? config.sequence.findIndex(s => s.type === type) : SDR_ACTIVITY_TYPES.indexOf(type);
+  // Passo D0 da régua (contato inicial): normalizeCadenceConfig garante que sempre existe.
+  const day0Step = findCadenceStep(config.steps, 0)!;
 
   // 3. Novos cards — fila BDR ordenada por RECÊNCIA dentro de cada porte (regra
   //    de recência confirmada pelo cliente em 15/07/2026; distribuição
@@ -244,19 +235,16 @@ async function processSDR(
       const deal = dealDoc.data();
       const activities: CadenceCard["activities"] = {};
 
-      // Só os canais do dia 0 (imediatos) entram no card no momento da distribuição.
-      // Canais de dias seguintes (ex.: WhatsApp amanhã) são criados pelo bloco de
-      // "passos futuros da sequência" abaixo, no dia exato em que vencem — mesmo
-      // padrão que a régua semanal de follow-up já usa.
-      for (const step of day0Steps) {
-        const dueAt = hasCustomSequence ? periodTimeOnDay(step.period, config.periodTimes, todayBRT) : todayStart;
-        const order = sequenceOrderOf(step.type);
-        const activityId = makeActivity(dealDoc.id, deal, step.type, "sdr_daily", dueAt, order);
-        activities[step.type] = { type: step.type, status: "pending", activityId, sequenceOrder: order };
+      // Só os canais do D0 (contato inicial) entram no card no momento da
+      // distribuição. Os passos seguintes da régua (D+1, D+3, D+5...) são
+      // criados pelo bloco de "passos tardios" abaixo, no dia exato em que vencem.
+      for (const type of day0Step.types) {
+        const activityId = makeActivity(dealDoc.id, deal, type, "sdr_daily", todayStart);
+        activities[type] = { type, status: "pending", activityId };
       }
 
       // Marca o deal como atribuído ao SDR (sai da fila BDR).
-      // assignedAt ancora a régua semanal decrescente de follow-ups.
+      // assignedAt ancora os passos seguintes da régua (D+1, D+3...).
       batch.update(dealDoc.ref, {
         status: "open",
         assignedSdrId: sdrId,
@@ -294,11 +282,10 @@ async function processSDR(
     }
   }
 
-  // 4. Passos tardios da sequência (dayOffset > 0, ex.: WhatsApp no dia seguinte)
-  //    + follow-ups da cadência semanal decrescente (3 → 2 → 1 contatos/semana):
-  //    leads já atribuídos a este SDR, olhando quantos dias fazem desde a
-  //    distribuição (assignedAt). Mesmo mecanismo pros dois: nada é criado com
-  //    antecedência, cada passo nasce no dia exato em que vence.
+  // 4. Passos tardios da régua (D+1, D+3, D+5, D+8, D+12, D+17, D+23,
+  //    D+29): leads já atribuídos a este SDR, olhando quantos dias fazem desde
+  //    a distribuição (assignedAt). Nada é criado com antecedência — cada
+  //    passo nasce no dia exato em que vence.
   const now = new Date();
   const assignedSnap = await db
     .collection(`tenants/${tenantId}/deals`)
@@ -310,36 +297,24 @@ async function processSDR(
     const deal = dealDoc.data();
     // Lead já passou o bastão (ou está em handoff) → sai da régua do SDR
     if (deal.handoffStatus) continue;
+    // Prospect respondeu e está em Standby (follow-up personalizado) → régua
+    // automática pausa até a fila de Standby terminar (documento "Cadência
+    // Comercial SDRs": "resposta do prospect interrompe a cadência automática").
+    if (deal.standbyActive) continue;
     const assignedAt: Date | null = deal.assignedAt?.toDate?.() ?? null;
-    if (!assignedAt) continue; // legado sem âncora — não gera passo/follow-up
+    if (!assignedAt) continue; // legado sem âncora — não gera passo
 
     const days = daysBetweenBRT(assignedAt, now);
+    if (days <= 0) continue;
 
-    // 4a. Passo(s) da sequência configurada que vencem exatamente hoje.
-    if (hasCustomSequence && days > 0) {
-      for (const step of stepsForDayOffset(config.sequence, days)) {
-        const dueAt = periodTimeOnDay(step.period, config.periodTimes, todayBRT);
-        const order = sequenceOrderOf(step.type);
-        const activityId = makeActivity(dealDoc.id, deal, step.type, "sdr_daily", dueAt, order);
-        cards.push({
-          dealId: dealDoc.id,
-          contactName: deal.company || "Contato",
-          companyName: deal.company || "Empresa",
-          productId: deal.productId || "wizmart",
-          isNew: false,
-          sequenceStep: true,
-          sequenceLabel: `Sequência · ${ACTIVITY_TYPE_CONFIG[step.type].label}`,
-          activities: { [step.type]: { type: step.type, status: "pending", activityId, sequenceOrder: order } },
-        });
-      }
+    const step = findCadenceStep(config.steps, days);
+    if (!step) continue; // hoje não é dia de contato pra este lead
+
+    const activities: CadenceCard["activities"] = {};
+    for (const type of step.types) {
+      const activityId = makeActivity(dealDoc.id, deal, type, "sdr_daily", todayStart);
+      activities[type] = { type, status: "pending", activityId };
     }
-
-    // 4b. Follow-up da régua semanal decrescente.
-    const followUp = followUpForDay(days, config.weeklyContacts);
-    if (!followUp) continue;
-
-    const channel = followUpChannel(followUp.week, followUp.contactIndex, config.weeklyContacts);
-    const activityId = makeActivity(dealDoc.id, deal, channel, "sdr_followup");
 
     cards.push({
       dealId: dealDoc.id,
@@ -347,9 +322,9 @@ async function processSDR(
       companyName: deal.company || "Empresa",
       productId: deal.productId || "wizmart",
       isNew: false,
-      followUp: true,
-      weekLabel: `Semana ${followUp.week} · contato ${followUp.contactIndex}`,
-      activities: { [channel]: { type: channel, status: "pending", activityId } },
+      sequenceStep: true,
+      sequenceLabel: step.label,
+      activities,
     });
   }
 

@@ -17,8 +17,6 @@ export interface CadenceActivity {
   type: ActivityType;
   status: 'pending' | 'completed' | 'overdue' | 'skipped';
   activityId?: string;
-  /** Posição na sequência configurada pelo admin (ordem de exibição/execução sugerida). */
-  sequenceOrder?: number;
 }
 
 export interface CadenceCard {
@@ -27,13 +25,9 @@ export interface CadenceCard {
   companyName: string;
   productId: string;
   isNew: boolean; // card distribuído hoje vs carry-over de ontem
-  /** Card de follow-up da cadência semanal decrescente (1 contato) */
-  followUp?: boolean;
-  /** Rótulo do follow-up, ex.: "Semana 2 · contato 1" */
-  weekLabel?: string;
-  /** Card de um passo tardio da sequência de contato (dayOffset > 0), disparado no dia certo. */
+  /** Card de um passo tardio da régua fixa (dayOffset > 0), disparado no dia certo. */
   sequenceStep?: boolean;
-  /** Rótulo do passo de sequência, ex.: "Sequência · WhatsApp" */
+  /** Rótulo do passo, ex.: "Ligação + LinkedIn" */
   sequenceLabel?: string;
   activities: Partial<Record<ActivityType, CadenceActivity>>;
 }
@@ -49,49 +43,75 @@ export interface DailyQueue {
   cards: CadenceCard[];
 }
 
-// ── Sequência de contato dos cards novos (Plano de 24/08/2026) ───────────────
-// Configurável pelo admin master em settings/cadence.sdr.sequence — instrui os
-// SDRs em que dia/período de cada card novo enviar cada canal (ex.: e-mail e
-// ligação hoje de manhã, LinkedIn hoje à tarde, WhatsApp amanhã no fim do dia).
-// Sequência vazia (`[]`) = comportamento legado: os 4 canais no dia 0, sem
-// período (dueAt = hoje 23:59), na ordem fixa de SDR_ACTIVITY_TYPES.
+// ── Régua de contato SDR — editável pela gestão em settings/cadence.sdr.steps ─
+// Documento "Cadência Comercial SDRs do Dia 1 ao Dia 30" (confirmado com o
+// Alan, 27/08/2026) define a régua padrão abaixo; master/manager podem
+// reconfigurá-la em Configurações → Cadência (pedido do Alan, 27/08/2026).
+// Sequência configurável (offsets 0–3) e a régua semanal decrescente (3→2→1)
+// que existiam antes foram substituídas por esta régua de passos livres.
+//
+// D+23 do documento diz "WhatsApp ou e-mail de validação" (dá a escolha ao
+// SDR); o padrão fixa WhatsApp, já que e-mail já aparece nos passos D+5/D+12/D+29.
+// "Pesquisa" do D0 não vira uma activity rastreável — é preparo do SDR antes
+// de ligar, não um canal de contato como os outros 4.
 
-export type Period = 'manha' | 'tarde' | 'fim_dia';
-
-export interface SequenceStep {
-  type: ActivityType;
-  /** 0 = mesmo dia da distribuição do card, 1 = dia seguinte, etc. (0–3) */
+export interface CadenceStepDef {
+  /** Dias corridos desde a distribuição do card (0 = dia da distribuição). */
   dayOffset: number;
-  period: Period;
+  /** Canal(is) tocado(s) nesse dia — mais de um quando o passo combina ações. */
+  types: ActivityType[];
+  /** Rótulo exibido pro SDR (badge do card). */
+  label: string;
 }
 
-export interface PeriodTimes {
-  manha: string;   // "HH:mm", padrão "09:00"
-  tarde: string;   // padrão "13:00"
-  fim_dia: string; // padrão "18:00"
+/** Régua padrão (documento "Cadência Comercial SDRs do Dia 1 ao Dia 30"), usada
+ * quando a gestão ainda não configurou uma régua própria, ou como fallback de
+ * segurança se a configurada estiver inválida. */
+export const DEFAULT_SDR_CADENCE_STEPS: CadenceStepDef[] = [
+  { dayOffset: 0,  types: ['call', 'email', 'linkedin'], label: 'Contato inicial' },
+  { dayOffset: 1,  types: ['whatsapp'],                   label: 'WhatsApp' },
+  { dayOffset: 3,  types: ['call', 'linkedin'],           label: 'Ligação + LinkedIn' },
+  { dayOffset: 5,  types: ['email'],                      label: 'E-mail de benefício' },
+  { dayOffset: 8,  types: ['call', 'whatsapp'],           label: 'Ligação + WhatsApp' },
+  { dayOffset: 12, types: ['email'],                      label: 'E-mail com case' },
+  { dayOffset: 17, types: ['call', 'linkedin'],           label: 'Ligação + LinkedIn' },
+  { dayOffset: 23, types: ['whatsapp'],                   label: 'WhatsApp de validação' },
+  { dayOffset: 29, types: ['call', 'email'],              label: 'Ligação + e-mail de encerramento' },
+];
+
+/** Passo da régua que vence no dia informado, ou undefined se não é dia de contato. */
+export function findCadenceStep(steps: CadenceStepDef[], dayOffset: number): CadenceStepDef | undefined {
+  return steps.find(s => s.dayOffset === dayOffset);
 }
 
-export const DEFAULT_PERIOD_TIMES: PeriodTimes = {
-  manha: '09:00',
-  tarde: '13:00',
-  fim_dia: '18:00',
-};
+/** Máximo de dias corridos que um passo da régua pode levar (~3 meses). */
+const MAX_STEP_DAY_OFFSET = 90;
+const MAX_STEP_LABEL_LEN = 60;
 
-const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-
-/** Calcula o instante (Date/UTC) de um período num dia BRT específico. Brasil
- * não tem mais horário de verão desde 2019 — BRT = UTC-3 o ano inteiro, então
- * somar 3h ao horário de parede BRT dá o instante UTC correto sem lib de fuso. */
-export function periodTimeOnDay(period: Period, periodTimes: PeriodTimes, dayBRT: string): Date {
-  const [y, m, d] = dayBRT.split('-').map(Number);
-  const raw = periodTimes[period] || DEFAULT_PERIOD_TIMES[period];
-  const [hh, mm] = HHMM_RE.test(raw) ? raw.split(':').map(Number) : DEFAULT_PERIOD_TIMES[period].split(':').map(Number);
-  return new Date(Date.UTC(y, m - 1, d, hh + 3, mm, 0));
-}
-
-/** Filtra os steps de uma sequência que caem num determinado dayOffset, preservando a ordem configurada. */
-export function stepsForDayOffset(sequence: SequenceStep[], dayOffset: number): SequenceStep[] {
-  return sequence.filter(s => s.dayOffset === dayOffset);
+/** Normaliza settings/cadence.sdr.steps — exige offsets inteiros únicos (0–90),
+ * pelo menos 1 canal válido por passo e um passo em dayOffset 0 (contato
+ * inicial ao distribuir o card). Qualquer coisa inválida cai pra régua padrão
+ * do documento, pra nunca deixar o motor sem régua. */
+function normalizeSteps(raw: any): CadenceStepDef[] {
+  if (!Array.isArray(raw) || raw.length === 0) return DEFAULT_SDR_CADENCE_STEPS;
+  const validTypes = new Set<string>(SDR_ACTIVITY_TYPES);
+  const seenOffsets = new Set<number>();
+  const steps: CadenceStepDef[] = [];
+  for (const item of raw) {
+    const dayOffset = Number(item?.dayOffset);
+    if (!Number.isInteger(dayOffset) || dayOffset < 0 || dayOffset > MAX_STEP_DAY_OFFSET) return DEFAULT_SDR_CADENCE_STEPS;
+    if (seenOffsets.has(dayOffset)) return DEFAULT_SDR_CADENCE_STEPS;
+    const rawTypes: unknown[] = Array.isArray(item?.types) ? item.types : [];
+    const types = Array.from(new Set(rawTypes)).filter((t): t is ActivityType => typeof t === 'string' && validTypes.has(t));
+    if (types.length === 0) return DEFAULT_SDR_CADENCE_STEPS;
+    const label = typeof item?.label === 'string' && item.label.trim()
+      ? item.label.trim().slice(0, MAX_STEP_LABEL_LEN)
+      : types.map(t => ACTIVITY_TYPE_CONFIG[t].label).join(' + ');
+    seenOffsets.add(dayOffset);
+    steps.push({ dayOffset, types, label });
+  }
+  if (!steps.some(s => s.dayOffset === 0)) return DEFAULT_SDR_CADENCE_STEPS;
+  return steps.sort((a, b) => a.dayOffset - b.dayOffset);
 }
 
 // ── Configuração de cadência (editável pela gestão em settings/cadence) ──────
@@ -99,51 +119,17 @@ export function stepsForDayOffset(sequence: SequenceStep[], dayOffset: number): 
 export interface CadenceConfig {
   /** Máximo de cards novos por dia para o SDR (padrão 3) */
   newCardsPerDay: number;
-  /** Contatos de follow-up por semana de vida do lead na fila (padrão [3, 2, 1]) */
-  weeklyContacts: number[];
   /** SLA em dias úteis para o 1º contato do Rep após aceitar handoff (padrão 3) */
   repFirstContactBusinessDays: number;
-  /** Sequência configurável dos 4 canais do blitz de um card novo. Vazio = comportamento legado. */
-  sequence: SequenceStep[];
-  /** Horários dos períodos manhã/tarde/fim do dia, usados pela sequência acima. */
-  periodTimes: PeriodTimes;
+  /** Régua de contato do SDR (dias e canais desde a distribuição do card). */
+  steps: CadenceStepDef[];
 }
 
 export const DEFAULT_CADENCE_CONFIG: CadenceConfig = {
   newCardsPerDay: 3,
-  weeklyContacts: [3, 2, 1],
   repFirstContactBusinessDays: 3,
-  sequence: [],
-  periodTimes: DEFAULT_PERIOD_TIMES,
+  steps: DEFAULT_SDR_CADENCE_STEPS,
 };
-
-const VALID_PERIODS: Period[] = ['manha', 'tarde', 'fim_dia'];
-
-/** Normaliza settings/cadence.sdr.sequence — só aceita uma sequência com exatamente
- * os 4 canais existentes (sem duplicar, sem faltar nenhum); qualquer coisa inválida
- * cai pro padrão legado ([]), pra nunca deixar um card sem todos os canais. */
-function normalizeSequence(raw: any): SequenceStep[] {
-  if (!Array.isArray(raw) || raw.length !== SDR_ACTIVITY_TYPES.length) return [];
-  const seen = new Set<ActivityType>();
-  const steps: SequenceStep[] = [];
-  for (const item of raw) {
-    const type = item?.type;
-    const dayOffset = Number(item?.dayOffset);
-    const period = item?.period;
-    if (!SDR_ACTIVITY_TYPES.includes(type)) return [];
-    if (seen.has(type)) return [];
-    if (!Number.isFinite(dayOffset) || dayOffset < 0 || dayOffset > 3 || !Number.isInteger(dayOffset)) return [];
-    if (!VALID_PERIODS.includes(period)) return [];
-    seen.add(type);
-    steps.push({ type, dayOffset, period });
-  }
-  return steps;
-}
-
-function normalizePeriodTimes(raw: any): PeriodTimes {
-  const pick = (key: Period) => (typeof raw?.[key] === 'string' && HHMM_RE.test(raw[key])) ? raw[key] : DEFAULT_PERIOD_TIMES[key];
-  return { manha: pick('manha'), tarde: pick('tarde'), fim_dia: pick('fim_dia') };
-}
 
 /** Normaliza o doc settings/cadence (parcial/ausente) em uma config válida. */
 export function normalizeCadenceConfig(raw: any): CadenceConfig {
@@ -151,15 +137,10 @@ export function normalizeCadenceConfig(raw: any): CadenceConfig {
     const n = Number(v);
     return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : dflt;
   };
-  const weekly = Array.isArray(raw?.sdr?.weeklyContacts) && raw.sdr.weeklyContacts.length > 0
-    ? raw.sdr.weeklyContacts.map((c: any) => clamp(c, 0, 7, 0))
-    : DEFAULT_CADENCE_CONFIG.weeklyContacts;
   return {
     newCardsPerDay: clamp(raw?.sdr?.newCardsPerDay, 0, 10, DEFAULT_CADENCE_CONFIG.newCardsPerDay),
-    weeklyContacts: weekly,
     repFirstContactBusinessDays: clamp(raw?.rep?.firstContactBusinessDays, 1, 15, DEFAULT_CADENCE_CONFIG.repFirstContactBusinessDays),
-    sequence: normalizeSequence(raw?.sdr?.sequence),
-    periodTimes: normalizePeriodTimes(raw?.sdr?.periodTimes),
+    steps: normalizeSteps(raw?.sdr?.steps),
   };
 }
 
@@ -174,53 +155,6 @@ export function normalizeCadenceConfig(raw: any): CadenceConfig {
 export function calcNewCards(rate: number | null, maxCards: number = 3): number {
   if (rate === null) return maxCards; // Primeiro dia: recebe o máximo (taxa padrão = 1.0)
   return Math.min(maxCards, Math.max(0, Math.floor(maxCards * rate)));
-}
-
-// ── Cadência semanal decrescente (Observações do cliente, jul/2026) ──────────
-// Semana 1 do lead na fila: 3 contatos · Semana 2: 2 · Semana 3: 1.
-// O dia 0 (distribuição) tem o blitz de 4 canais; os follow-ups são contatos
-// únicos nos dias marcados de cada semana.
-
-/** Dias da semana (1–7, relativos ao início da semana) em que caem `count` contatos. */
-export function contactDayOffsets(count: number): number[] {
-  switch (count) {
-    case 3:  return [2, 4, 6];
-    case 2:  return [3, 6];
-    case 1:  return [4];
-    default:
-      if (count <= 0) return [];
-      // >3 contatos: distribui uniformemente nos dias 1–7
-      return Array.from({ length: Math.min(count, 7) }, (_, i) =>
-        1 + Math.round((i * 6) / Math.max(1, Math.min(count, 7) - 1)));
-  }
-}
-
-/**
- * Retorna o follow-up devido para um lead com `daysSinceAssigned` dias de fila,
- * ou null se hoje não é dia de contato (ou a régua acabou).
- * Semana 1 = dias 1–7 · Semana 2 = dias 8–14 · Semana 3 = dias 15–21.
- */
-export function followUpForDay(
-  daysSinceAssigned: number,
-  weeklyContacts: number[] = DEFAULT_CADENCE_CONFIG.weeklyContacts,
-): { week: number; contactIndex: number } | null {
-  if (daysSinceAssigned <= 0) return null;
-  const week = Math.floor((daysSinceAssigned - 1) / 7); // 0-based
-  if (week >= weeklyContacts.length) return null;
-  const dayInWeek = daysSinceAssigned - week * 7; // 1..7
-  const idx = contactDayOffsets(weeklyContacts[week]).indexOf(dayInWeek);
-  if (idx === -1) return null;
-  return { week: week + 1, contactIndex: idx + 1 };
-}
-
-/** Canal do follow-up: rotaciona pela prioridade (ligação → LinkedIn → WhatsApp). */
-export function followUpChannel(week: number, contactIndex: number, weeklyContacts: number[] = DEFAULT_CADENCE_CONFIG.weeklyContacts): ActivityType {
-  const priorityRotation: ActivityType[] = ['call', 'linkedin', 'whatsapp'];
-  let contactsBefore = 0;
-  for (let w = 0; w < week - 1 && w < weeklyContacts.length; w++) {
-    contactsBefore += contactDayOffsets(weeklyContacts[w]).length;
-  }
-  return priorityRotation[(contactsBefore + contactIndex - 1) % priorityRotation.length];
 }
 
 /** Dias corridos entre duas datas, medidos no calendário BRT. */

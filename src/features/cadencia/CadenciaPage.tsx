@@ -27,7 +27,6 @@ import { CompleteActivityModal } from './CompleteActivityModal';
 import {
   SDR_ACTIVITY_TYPES,
   ACTIVITY_TYPE_CONFIG,
-  PERIOD_LABEL,
   dayOffsetLabel,
   calcNewCards,
   calcCompletionRate,
@@ -35,7 +34,7 @@ import {
   classifyDueActivities,
   type ActivityType,
   type CadenceCard,
-  type SequenceStep,
+  type CadenceStepDef,
 } from '../../utils/cadenceUtils';
 import { useFirestoreCollection } from '../../hooks/useFirestore';
 import { PRODUCT_COLOR } from '../../utils/crmFormat';
@@ -108,27 +107,21 @@ interface CadenceCardProps {
   onComplete: (type: ActivityType, activityId: string, card: CadenceCard) => void;
   /** Abre a página inteira do lead (/lead/:dealId) */
   onOpenLead?: (dealId: string) => void;
-  /** Sequência configurada pelo admin (vazia = ordem legada fixa) */
-  sequence: SequenceStep[];
+  /** Régua configurada pela gestão (settings/cadence.sdr.steps) */
+  steps: CadenceStepDef[];
 }
 
-function CadenceCardItem({ card, onComplete, onOpenLead, sequence }: CadenceCardProps) {
-  // Cards novos têm o blitz de canais do dia 0; follow-ups/passos tardios têm 1 contato único.
-  const presentTypes = SDR_ACTIVITY_TYPES
-    .filter(t => card.activities[t])
-    .slice()
-    .sort((a, b) => (card.activities[a]?.sequenceOrder ?? SDR_ACTIVITY_TYPES.indexOf(a)) - (card.activities[b]?.sequenceOrder ?? SDR_ACTIVITY_TYPES.indexOf(b)));
+function CadenceCardItem({ card, onComplete, onOpenLead, steps }: CadenceCardProps) {
+  // Cards novos têm o contato inicial (D0); passos tardios têm 1-2 canais.
+  const presentTypes = SDR_ACTIVITY_TYPES.filter(t => card.activities[t]);
   const done = presentTypes.filter(t => card.activities[t]?.status === 'completed').length;
   const total = presentTypes.length;
   const prodColor = card.productId ? PRODUCT_COLOR[card.productId as 'wizmart' | 'smart_cafe']?.primary : '#1A6B1A';
   const pct = total > 0 ? Math.round((done / total) * 100) : 100;
 
-  // Canais que essa sequência prevê pra este card, mas que ainda não chegaram
-  // (dayOffset > 0 e ainda não presentes) — só pra cards novos do dia 0, só
-  // orientação visual (o passo real é criado pelo motor no dia certo).
-  const upcomingSteps = card.isNew
-    ? sequence.filter(s => s.dayOffset > 0 && !card.activities[s.type])
-    : [];
+  // Próximos passos da régua pra este card (D+1, D+3...) — só orientação
+  // visual pra cards novos do dia 0 (o passo real é criado pelo motor no dia certo).
+  const upcomingSteps = card.isNew ? steps.filter(s => s.dayOffset > 0) : [];
 
   return (
     <div
@@ -138,15 +131,10 @@ function CadenceCardItem({ card, onComplete, onOpenLead, sequence }: CadenceCard
       {/* Faixa lateral de produto */}
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, background: prodColor }} />
 
-      {/* Badge "Novo card" / follow-up da régua semanal */}
+      {/* Badge "Novo card" / passo da régua fixa */}
       {card.isNew && (
         <span className="badge" style={{ position: 'absolute', top: 12, right: 14, fontSize: 10, background: '#EDE9FE', color: '#7C3AED', border: '1px solid #C4B5FD' }}>
           ✨ Novo hoje
-        </span>
-      )}
-      {card.followUp && (
-        <span className="badge" style={{ position: 'absolute', top: 12, right: 14, fontSize: 10, background: '#FEF3C7', color: '#92400E', border: '1px solid #F59E0B44' }}>
-          🔁 {card.weekLabel ?? 'Follow-up'}
         </span>
       )}
       {card.sequenceStep && (
@@ -195,13 +183,13 @@ function CadenceCardItem({ card, onComplete, onOpenLead, sequence }: CadenceCard
         })}
       </div>
 
-      {/* Orientação da sequência: canais previstos pra depois, ainda não liberados */}
+      {/* Orientação da régua: próximos passos previstos, ainda não liberados */}
       {upcomingSteps.length > 0 && (
         <div style={{ fontSize: 11, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
           <Icon name="CalendarClock" size={12} />
           {upcomingSteps.map((s, i) => (
-            <span key={s.type}>
-              {ACTIVITY_TYPE_CONFIG[s.type].label} {dayOffsetLabel(s.dayOffset).toLowerCase()} ({PERIOD_LABEL[s.period].toLowerCase()})
+            <span key={s.dayOffset}>
+              {s.label} {dayOffsetLabel(s.dayOffset).toLowerCase()}
               {i < upcomingSteps.length - 1 ? ' · ' : ''}
             </span>
           ))}
@@ -215,8 +203,8 @@ function CadenceCardItem({ card, onComplete, onOpenLead, sequence }: CadenceCard
 export function CadenciaPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
-  const { queue, loading, refreshQueue } = useCadencia();
-  const { config: cadenceConfig } = useCadenceConfig();
+  const { config: cadenceConfig, loading: cadenceConfigLoading } = useCadenceConfig();
+  const { queue, loading, refreshQueue } = useCadencia(cadenceConfig.steps, cadenceConfigLoading);
 
   const [completing, setCompleting] = useState<{
     activityId: string;
@@ -246,23 +234,15 @@ export function CadenciaPage() {
     ? queue.cards.filter(card => matchesProductId(productScope, (card.productId || 'wizmart') as any))
     : [];
 
-  // Ordem dos canais configurada pelo admin (settings/cadence.sdr.sequence) —
-  // usada tanto pra ordenar os cards (modo "Por cliente") quanto os blocos
-  // (modo "Por bloco"). Sem configuração, cai na ordem legada fixa.
-  const channelOrder = cadenceConfig.sequence.length === SDR_ACTIVITY_TYPES.length
-    ? cadenceConfig.sequence.map(s => s.type)
-    : SDR_ACTIVITY_TYPES;
-
   // Cards ordenados pela urgência: o card cuja próxima etapa PENDENTE vem mais
-  // cedo na sequência sobe pro topo — é isso que dá a "orientação clara da
-  // sequência" no nível da tela inteira, não só dentro de cada card.
+  // cedo na ordem fixa de canais (SDR_ACTIVITY_TYPES) sobe pro topo.
   const sortedCards = filteredCards.slice().sort((a, b) => {
     const priority = (card: CadenceCard) => {
       const pending = SDR_ACTIVITY_TYPES
         .map(t => card.activities[t])
         .filter((act): act is NonNullable<typeof act> => !!act && act.status !== 'completed');
       if (pending.length === 0) return Infinity;
-      return Math.min(...pending.map(act => act.sequenceOrder ?? channelOrder.indexOf(act.type)));
+      return Math.min(...pending.map(act => SDR_ACTIVITY_TYPES.indexOf(act.type)));
     };
     return priority(a) - priority(b);
   });
@@ -477,12 +457,12 @@ export function CadenciaPage() {
                 index={i}
                 onComplete={handleActivityClick}
                 onOpenLead={dealId => navigate(`/lead/${dealId}`)}
-                sequence={cadenceConfig.sequence}
+                steps={cadenceConfig.steps}
               />
             ))
           ) : (
-            /* Por bloco de canal, na ordem configurada (ex.: Email → LinkedIn → WhatsApp → Ligação) */
-            groupActivitiesByType(filteredCards, channelOrder).map(group => {
+            /* Por bloco de canal, na ordem fixa (Ligação → LinkedIn → WhatsApp → Email) */
+            groupActivitiesByType(filteredCards).map(group => {
               const cfg = ACTIVITY_TYPE_CONFIG[group.type];
               const pendingCount = group.items.filter(i => i.status !== 'completed').length;
               return (
@@ -507,7 +487,7 @@ export function CadenciaPage() {
                         >
                           <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {item.card.contactName}
-                            {item.card.followUp && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> · {item.card.weekLabel}</span>}
+                            {item.card.sequenceStep && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> · {item.card.sequenceLabel}</span>}
                           </div>
                           <div className="muted" style={{ fontSize: 11.5 }}>{item.card.companyName}</div>
                         </div>

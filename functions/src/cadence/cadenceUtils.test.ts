@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   pickBalancedCandidates,
-  periodTimeOnDay,
-  stepsForDayOffset,
   normalizeCadenceConfig,
-  DEFAULT_PERIOD_TIMES,
-  type SequenceStep,
+  findCadenceStep,
+  DEFAULT_SDR_CADENCE_STEPS,
 } from "./cadenceUtils";
 
 interface TestCandidate {
@@ -102,108 +100,127 @@ describe("pickBalancedCandidates", () => {
   });
 });
 
-describe("periodTimeOnDay", () => {
-  it("converte manhã (09:00 BRT) pro instante UTC correto (12:00 UTC, BRT = UTC-3)", () => {
-    const d = periodTimeOnDay("manha", DEFAULT_PERIOD_TIMES, "2026-08-24");
-    expect(d.toISOString()).toBe("2026-08-24T12:00:00.000Z");
+describe("DEFAULT_SDR_CADENCE_STEPS / findCadenceStep — régua padrão do documento", () => {
+  it("tem 9 passos, começando em D0 e terminando em D+29", () => {
+    expect(DEFAULT_SDR_CADENCE_STEPS).toHaveLength(9);
+    expect(DEFAULT_SDR_CADENCE_STEPS[0].dayOffset).toBe(0);
+    expect(DEFAULT_SDR_CADENCE_STEPS[DEFAULT_SDR_CADENCE_STEPS.length - 1].dayOffset).toBe(29);
   });
 
-  it("converte fim do dia (18:00 BRT) pro instante UTC correto (21:00 UTC)", () => {
-    const d = periodTimeOnDay("fim_dia", DEFAULT_PERIOD_TIMES, "2026-08-24");
-    expect(d.toISOString()).toBe("2026-08-24T21:00:00.000Z");
+  it("D0 é o contato inicial: ligação, e-mail e LinkedIn (sem WhatsApp)", () => {
+    const step = findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 0);
+    expect(step?.types).toEqual(["call", "email", "linkedin"]);
   });
 
-  it("usa o horário customizado do período quando configurado", () => {
-    const custom = { manha: "08:30", tarde: "13:00", fim_dia: "18:00" };
-    const d = periodTimeOnDay("manha", custom, "2026-08-24");
-    expect(d.toISOString()).toBe("2026-08-24T11:30:00.000Z");
+  it("D+1 é só WhatsApp", () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 1)?.types).toEqual(["whatsapp"]);
   });
 
-  it("cai pro horário padrão se o valor configurado for inválido", () => {
-    const broken = { manha: "not-a-time", tarde: "13:00", fim_dia: "18:00" } as any;
-    const d = periodTimeOnDay("manha", broken, "2026-08-24");
-    expect(d.toISOString()).toBe("2026-08-24T12:00:00.000Z"); // padrão 09:00 BRT
+  it("D+3 e D+17 combinam ligação e LinkedIn", () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 3)?.types).toEqual(["call", "linkedin"]);
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 17)?.types).toEqual(["call", "linkedin"]);
+  });
+
+  it("D+8 combina ligação e WhatsApp", () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 8)?.types).toEqual(["call", "whatsapp"]);
+  });
+
+  it("D+5 e D+12 são e-mails isolados (benefício e case)", () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 5)?.types).toEqual(["email"]);
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 12)?.types).toEqual(["email"]);
+  });
+
+  it("D+29 combina ligação e e-mail de encerramento", () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 29)?.types).toEqual(["call", "email"]);
+  });
+
+  it("dias sem passo definido (ex.: 2, 4, 30) retornam undefined", () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 2)).toBeUndefined();
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 4)).toBeUndefined();
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 30)).toBeUndefined();
+  });
+
+  it("findCadenceStep funciona com uma régua customizada qualquer", () => {
+    const custom = [{ dayOffset: 0, types: ["email" as const], label: "Só e-mail" }];
+    expect(findCadenceStep(custom, 0)?.label).toBe("Só e-mail");
+    expect(findCadenceStep(custom, 1)).toBeUndefined();
   });
 });
 
-describe("stepsForDayOffset", () => {
-  const sequence: SequenceStep[] = [
-    { type: "email",    dayOffset: 0, period: "manha" },
-    { type: "call",     dayOffset: 0, period: "manha" },
-    { type: "linkedin", dayOffset: 0, period: "tarde" },
-    { type: "whatsapp", dayOffset: 1, period: "fim_dia" },
-  ];
-
-  it("filtra só os steps do dia pedido, preservando a ordem original", () => {
-    expect(stepsForDayOffset(sequence, 0).map(s => s.type)).toEqual(["email", "call", "linkedin"]);
-    expect(stepsForDayOffset(sequence, 1).map(s => s.type)).toEqual(["whatsapp"]);
-    expect(stepsForDayOffset(sequence, 2)).toEqual([]);
-  });
-});
-
-describe("normalizeCadenceConfig — sequência e horários dos períodos", () => {
-  it("sequência ausente/vazia cai pro padrão legado ([])", () => {
-    expect(normalizeCadenceConfig(null).sequence).toEqual([]);
-    expect(normalizeCadenceConfig({ sdr: {} }).sequence).toEqual([]);
+describe("normalizeCadenceConfig", () => {
+  it("config ausente cai pro padrão (3 cards/dia, SLA de 3 dias úteis, régua do documento)", () => {
+    const cfg = normalizeCadenceConfig(null);
+    expect(cfg.newCardsPerDay).toBe(3);
+    expect(cfg.repFirstContactBusinessDays).toBe(3);
+    expect(cfg.steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
 
-  it("aceita uma sequência válida com os 4 canais, sem duplicar nem faltar nenhum", () => {
+  it("respeita valores configurados dentro do intervalo válido", () => {
+    const cfg = normalizeCadenceConfig({ sdr: { newCardsPerDay: 5 }, rep: { firstContactBusinessDays: 2 } });
+    expect(cfg.newCardsPerDay).toBe(5);
+    expect(cfg.repFirstContactBusinessDays).toBe(2);
+  });
+
+  it("valores fora do intervalo são limitados (clamp)", () => {
+    const cfg = normalizeCadenceConfig({ sdr: { newCardsPerDay: 99 }, rep: { firstContactBusinessDays: 0 } });
+    expect(cfg.newCardsPerDay).toBe(10);
+    expect(cfg.repFirstContactBusinessDays).toBe(1);
+  });
+
+  it("aceita uma régua customizada válida", () => {
     const raw = {
       sdr: {
-        sequence: [
-          { type: "email",    dayOffset: 0, period: "manha" },
-          { type: "linkedin", dayOffset: 0, period: "tarde" },
-          { type: "whatsapp", dayOffset: 1, period: "fim_dia" },
-          { type: "call",     dayOffset: 0, period: "manha" },
+        steps: [
+          { dayOffset: 0, types: ["call"], label: "Ligação inicial" },
+          { dayOffset: 2, types: ["email", "whatsapp"], label: "Follow-up" },
         ],
       },
     };
     const cfg = normalizeCadenceConfig(raw);
-    expect(cfg.sequence).toHaveLength(4);
-    expect(cfg.sequence[2]).toEqual({ type: "whatsapp", dayOffset: 1, period: "fim_dia" });
+    expect(cfg.steps).toEqual([
+      { dayOffset: 0, types: ["call"], label: "Ligação inicial" },
+      { dayOffset: 2, types: ["email", "whatsapp"], label: "Follow-up" },
+    ]);
   });
 
-  it("rejeita sequência com canal duplicado (cai pro padrão legado)", () => {
-    const raw = {
-      sdr: {
-        sequence: [
-          { type: "email", dayOffset: 0, period: "manha" },
-          { type: "email", dayOffset: 1, period: "tarde" },
-          { type: "linkedin", dayOffset: 0, period: "manha" },
-          { type: "call", dayOffset: 0, period: "manha" },
-        ],
-      },
-    };
-    expect(normalizeCadenceConfig(raw).sequence).toEqual([]);
+  it("ordena os passos por dia mesmo se vierem fora de ordem", () => {
+    const raw = { sdr: { steps: [
+      { dayOffset: 5, types: ["email"], label: "Depois" },
+      { dayOffset: 0, types: ["call"], label: "Início" },
+    ] } };
+    expect(normalizeCadenceConfig(raw).steps.map(s => s.dayOffset)).toEqual([0, 5]);
   });
 
-  it("rejeita sequência faltando um canal (cai pro padrão legado)", () => {
-    const raw = {
-      sdr: {
-        sequence: [
-          { type: "email", dayOffset: 0, period: "manha" },
-          { type: "linkedin", dayOffset: 0, period: "manha" },
-          { type: "call", dayOffset: 0, period: "manha" },
-        ],
-      },
-    };
-    expect(normalizeCadenceConfig(raw).sequence).toEqual([]);
+  it("gera um rótulo a partir dos canais quando o label vem vazio", () => {
+    const raw = { sdr: { steps: [{ dayOffset: 0, types: ["call", "email"], label: "" }] } };
+    expect(normalizeCadenceConfig(raw).steps[0].label).toBe("Ligação + Email");
   });
 
-  it("rejeita dayOffset fora do intervalo 0–3 ou período inválido", () => {
-    const base = [
-      { type: "email", dayOffset: 0, period: "manha" },
-      { type: "linkedin", dayOffset: 0, period: "manha" },
-      { type: "call", dayOffset: 0, period: "manha" },
-    ];
-    expect(normalizeCadenceConfig({ sdr: { sequence: [...base, { type: "whatsapp", dayOffset: 9, period: "manha" }] } }).sequence).toEqual([]);
-    expect(normalizeCadenceConfig({ sdr: { sequence: [...base, { type: "whatsapp", dayOffset: 1, period: "noite" }] } }).sequence).toEqual([]);
+  it("rejeita régua com dois passos no mesmo dia (cai pro padrão)", () => {
+    const raw = { sdr: { steps: [
+      { dayOffset: 0, types: ["call"], label: "A" },
+      { dayOffset: 0, types: ["email"], label: "B" },
+    ] } };
+    expect(normalizeCadenceConfig(raw).steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
 
-  it("horários dos períodos: usa configurado se for HH:mm válido, senão o padrão", () => {
-    expect(normalizeCadenceConfig({ sdr: { periodTimes: { manha: "08:00", tarde: "12:30", fim_dia: "19:00" } } }).periodTimes)
-      .toEqual({ manha: "08:00", tarde: "12:30", fim_dia: "19:00" });
-    expect(normalizeCadenceConfig({ sdr: { periodTimes: { manha: "25:99" } } }).periodTimes.manha).toBe(DEFAULT_PERIOD_TIMES.manha);
-    expect(normalizeCadenceConfig(null).periodTimes).toEqual(DEFAULT_PERIOD_TIMES);
+  it("rejeita régua sem passo no dia 0 (cai pro padrão)", () => {
+    const raw = { sdr: { steps: [{ dayOffset: 1, types: ["call"], label: "A" }] } };
+    expect(normalizeCadenceConfig(raw).steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
+  });
+
+  it("rejeita passo sem nenhum canal válido (cai pro padrão)", () => {
+    const raw = { sdr: { steps: [{ dayOffset: 0, types: [], label: "A" }] } };
+    expect(normalizeCadenceConfig(raw).steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
+  });
+
+  it("rejeita dayOffset fora do intervalo 0-90 (cai pro padrão)", () => {
+    const raw = { sdr: { steps: [{ dayOffset: 200, types: ["call"], label: "A" }] } };
+    expect(normalizeCadenceConfig(raw).steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
+  });
+
+  it("régua ausente/vazia usa o padrão do documento", () => {
+    expect(normalizeCadenceConfig({ sdr: {} }).steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
+    expect(normalizeCadenceConfig({ sdr: { steps: [] } }).steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
 });

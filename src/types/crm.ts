@@ -352,8 +352,6 @@ export interface Activity {
   status: ActivityStatus;
   scheduledAt?: any;
   dueAt?: any;
-  /** Posição na sequência de contato configurada (settings/cadence.sdr.sequence). */
-  sequenceOrder?: number;
   completedAt?: any;
   templateId?: string;
   templateUsed?: boolean;

@@ -5,26 +5,11 @@
  * Cada bloco cobre ramos que a suíte original não exercitava.
  */
 import { describe, it, expect } from 'vitest';
-import { contactDayOffsets, classifyDueActivities } from './cadenceUtils';
+import { classifyDueActivities } from './cadenceUtils';
 import { validateHandoffForm } from './funnelUtils';
 import { validateStandbySchedule, buildStandbySchedule } from './standbyUtils';
 import { fmtTimestamp } from './crmFormat';
 import { validateNextActionForm, getSuggestedNextActionDate } from './handoffUtils';
-
-// ── cadenceUtils: réguas customizadas acima de 3 contatos ─────────────────────
-describe('contactDayOffsets — réguas fora do padrão', () => {
-  it('4+ contatos distribui uniformemente nos dias 1–7', () => {
-    const offsets = contactDayOffsets(4);
-    expect(offsets).toHaveLength(4);
-    expect(offsets[0]).toBe(1);
-    expect(offsets[offsets.length - 1]).toBe(7);
-    // estritamente crescente
-    for (let i = 1; i < offsets.length; i++) expect(offsets[i]).toBeGreaterThan(offsets[i - 1]);
-  });
-  it('mais de 7 contatos trava em 7 dias', () => {
-    expect(contactDayOffsets(10)).toHaveLength(7);
-  });
-});
 
 // ── cadenceUtils: alertas de agenda ───────────────────────────────────────────
 describe('classifyDueActivities — alertas de agenda', () => {

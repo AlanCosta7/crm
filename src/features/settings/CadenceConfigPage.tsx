@@ -1,14 +1,18 @@
 /**
- * CadenceConfigPage.tsx — Programação manual da cadência (gestão)
+ * CadenceConfigPage.tsx — Programação da cadência (gestão)
  *
  * Rota: /settings/cadencia (master + manager)
  * Pedido do cliente (Observações CRM, jul/2026): "Programar a cadência
  * manualmente para SDRs e representantes."
  *
  * Salva em `tenants/{tid}/settings/cadence`:
- *   sdr.newCardsPerDay      — máximo de cards novos por dia (padrão 3)
- *   sdr.weeklyContacts      — contatos por semana de vida do lead (padrão [3,2,1])
+ *   sdr.newCardsPerDay           — máximo de cards novos por dia (padrão 3)
+ *   sdr.steps                    — régua de contato do SDR (dia + canais)
  *   rep.firstContactBusinessDays — SLA do 1º contato do Rep (padrão 3 dias úteis)
+ *
+ * A régua vem pré-carregada com o padrão do documento "Cadência Comercial
+ * SDRs do Dia 1 ao Dia 30" (confirmado com o Alan, 27/08/2026), mas master e
+ * manager podem editar livremente (pedido do Alan, 27/08/2026).
  *
  * O motor de cadência (dailyCadenceEngine, 7h BRT) e o repSlaChecker leem
  * esta configuração a cada execução.
@@ -20,24 +24,36 @@ import { db } from '../../config/firebase';
 import { useAuthStore } from '../../stores/authStore';
 import { Icon } from '../../components/ui/Icon';
 import {
-  SDR_ACTIVITY_TYPES, ACTIVITY_TYPE_CONFIG, PERIOD_LABEL, DAY_OFFSET_OPTIONS, dayOffsetLabel,
-  DEFAULT_PERIOD_TIMES, type Period, type SequenceStep, type PeriodTimes,
+  SDR_ACTIVITY_TYPES, ACTIVITY_TYPE_CONFIG, DEFAULT_SDR_CADENCE_STEPS, normalizeSteps,
+  type ActivityType, type CadenceStepDef,
 } from '../../utils/cadenceUtils';
 
-const DEFAULTS = { newCardsPerDay: 3, weeklyContacts: [3, 2, 1], repSla: 3 };
+const DEFAULTS = { newCardsPerDay: 3, repSla: 3 };
+const MAX_STEP_DAY_OFFSET = 90;
 
-const LEGACY_SEQUENCE: SequenceStep[] = SDR_ACTIVITY_TYPES.map(type => ({ type, dayOffset: 0, period: 'manha' as Period }));
+/** Validação com mensagens específicas pro admin — mais amigável que o
+ * fallback silencioso de `normalizeSteps` (usado só como rede de segurança). */
+function validateSteps(steps: CadenceStepDef[]): string | null {
+  if (steps.length === 0) return 'A régua precisa ter pelo menos 1 passo.';
+  if (!steps.some(s => s.dayOffset === 0)) return 'É preciso ter um passo no Dia 0 (contato inicial, feito ao distribuir o card).';
+  const seen = new Set<number>();
+  for (const s of steps) {
+    if (!Number.isInteger(s.dayOffset) || s.dayOffset < 0 || s.dayOffset > MAX_STEP_DAY_OFFSET) {
+      return `O dia do passo precisa ser um número inteiro entre 0 e ${MAX_STEP_DAY_OFFSET}.`;
+    }
+    if (seen.has(s.dayOffset)) return `Já existe um passo no dia ${s.dayOffset} — cada dia só pode ter 1 passo.`;
+    seen.add(s.dayOffset);
+    if (s.types.length === 0) return `O passo do dia ${s.dayOffset} precisa de pelo menos 1 canal selecionado.`;
+  }
+  return null;
+}
 
 export default function CadenceConfigPage() {
   const { user } = useAuthStore();
 
   const [newCardsPerDay, setNewCardsPerDay] = useState(DEFAULTS.newCardsPerDay);
-  const [week1, setWeek1] = useState(DEFAULTS.weeklyContacts[0]);
-  const [week2, setWeek2] = useState(DEFAULTS.weeklyContacts[1]);
-  const [week3, setWeek3] = useState(DEFAULTS.weeklyContacts[2]);
   const [repSla, setRepSla] = useState(DEFAULTS.repSla);
-  const [periodTimes, setPeriodTimes] = useState<PeriodTimes>(DEFAULT_PERIOD_TIMES);
-  const [sequence, setSequence] = useState<SequenceStep[]>(LEGACY_SEQUENCE);
+  const [steps, setSteps] = useState<CadenceStepDef[]>(DEFAULT_SDR_CADENCE_STEPS);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,50 +66,46 @@ export default function CadenceConfigPage() {
       const d = snap.data();
       if (d) {
         setNewCardsPerDay(d.sdr?.newCardsPerDay ?? DEFAULTS.newCardsPerDay);
-        const wc = Array.isArray(d.sdr?.weeklyContacts) ? d.sdr.weeklyContacts : DEFAULTS.weeklyContacts;
-        setWeek1(wc[0] ?? 3); setWeek2(wc[1] ?? 2); setWeek3(wc[2] ?? 1);
         setRepSla(d.rep?.firstContactBusinessDays ?? DEFAULTS.repSla);
-        setPeriodTimes(d.sdr?.periodTimes ?? DEFAULT_PERIOD_TIMES);
-        const seq = Array.isArray(d.sdr?.sequence) && d.sdr.sequence.length === SDR_ACTIVITY_TYPES.length
-          ? d.sdr.sequence
-          : LEGACY_SEQUENCE;
-        setSequence(seq);
+        setSteps(normalizeSteps(d.sdr?.steps));
       }
       setLoading(false);
     }, () => setLoading(false));
     return unsub;
   }, [user?.tenantId]);
 
-  const HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
-  const isValidPeriodTimes = (['manha', 'tarde', 'fim_dia'] as Period[]).every(p => HHMM_RE.test(periodTimes[p]));
+  const stepsError = validateSteps(steps);
 
-  const moveStep = (index: number, dir: -1 | 1) => {
-    setSequence(prev => {
-      const next = prev.slice();
-      const target = index + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  const updateStep = (index: number, patch: Partial<CadenceStepDef>) => {
+    setSteps(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s));
   };
 
-  const updateStep = (index: number, patch: Partial<SequenceStep>) => {
-    setSequence(prev => prev.map((s, i) => i === index ? { ...s, ...patch } : s));
+  const toggleStepType = (index: number, type: ActivityType) => {
+    setSteps(prev => prev.map((s, i) => {
+      if (i !== index) return s;
+      const types = s.types.includes(type) ? s.types.filter(t => t !== type) : [...s.types, type];
+      return { ...s, types };
+    }));
+  };
+
+  const removeStep = (index: number) => setSteps(prev => prev.filter((_, i) => i !== index));
+
+  const addStep = () => {
+    const nextOffset = steps.length ? Math.min(MAX_STEP_DAY_OFFSET, Math.max(...steps.map(s => s.dayOffset)) + 1) : 0;
+    setSteps(prev => [...prev, { dayOffset: nextOffset, types: [], label: '' }]);
   };
 
   const handleSave = async () => {
-    if (!user?.tenantId) return;
-    if (!isValidPeriodTimes) { setFeedback('error'); return; }
+    if (!user?.tenantId || stepsError) return;
     setSaving(true);
     setFeedback(null);
     try {
+      const stepsToSave = steps
+        .slice()
+        .sort((a, b) => a.dayOffset - b.dayOffset)
+        .map(s => ({ ...s, label: s.label.trim() || s.types.map(t => ACTIVITY_TYPE_CONFIG[t].label).join(' + ') }));
       await setDoc(doc(db, 'tenants', user.tenantId, 'settings', 'cadence'), {
-        sdr: {
-          newCardsPerDay: clamp(newCardsPerDay, 0, 10),
-          weeklyContacts: [clamp(week1, 0, 7), clamp(week2, 0, 7), clamp(week3, 0, 7)],
-          periodTimes,
-          sequence,
-        },
+        sdr: { newCardsPerDay: clamp(newCardsPerDay, 0, 10), steps: stepsToSave },
         rep: { firstContactBusinessDays: clamp(repSla, 1, 15) },
         updatedAt: serverTimestamp(),
         updatedBy: user.uid,
@@ -157,116 +169,111 @@ export default function CadenceConfigPage() {
           hint="Máximo de leads novos distribuídos por SDR a cada manhã. A quantidade real depende da taxa de conclusão do dia anterior."
           value={newCardsPerDay} onChange={setNewCardsPerDay} min={0} max={10}
         />
-
-        <div>
-          <div className="fl" style={{ marginBottom: 8 }}>Contatos de follow-up por semana do lead</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, maxWidth: 440 }}>
-            {[
-              { label: '1ª semana', value: week1, set: setWeek1 },
-              { label: '2ª semana', value: week2, set: setWeek2 },
-              { label: '3ª semana', value: week3, set: setWeek3 },
-            ].map(w => (
-              <div key={w.label} className="card" style={{ padding: '10px 12px', textAlign: 'center' }}>
-                <div className="label" style={{ fontSize: 10.5, marginBottom: 6 }}>{w.label}</div>
-                <input
-                  className="input"
-                  type="number" min={0} max={7}
-                  value={w.value}
-                  onChange={e => w.set(Number(e.target.value))}
-                  style={{ textAlign: 'center' }}
-                />
-                <div className="muted" style={{ fontSize: 10.5, marginTop: 4 }}>contatos</div>
-              </div>
-            ))}
-          </div>
-          <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-            Régua decrescente padrão: 3 contatos na 1ª semana do lead na fila, 2 na 2ª e 1 na 3ª.
-            Os contatos usam os canais prioritários em rodízio (ligação → LinkedIn → WhatsApp).
-          </p>
-        </div>
       </div>
 
-      {/* Sequência de contato dos cards novos */}
-      <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div className="row" style={{ gap: 8 }}>
-          <Icon name="ListOrdered" size={18} color="var(--primary)" />
-          <h3 style={{ margin: 0 }}>Sequência de Contato dos Cards Novos</h3>
-        </div>
-        <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
-          Instrua os SDRs sobre em que dia e período executar cada canal de um card novo (ex.: e-mail e ligação
-          hoje de manhã, LinkedIn à tarde, WhatsApp só amanhã no fim do dia). O SDR ainda pode adiantar uma etapa
-          se quiser — isto orienta a ordem sugerida, não trava o botão.
-        </p>
-
-        {/* Horário dos períodos */}
+      {/* Régua de contato — editável */}
+      <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div>
-          <div className="fl" style={{ marginBottom: 8 }}>Horário dos períodos</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, maxWidth: 440 }}>
-            {(['manha', 'tarde', 'fim_dia'] as Period[]).map(p => (
-              <div key={p} className="card" style={{ padding: '10px 12px', textAlign: 'center' }}>
-                <div className="label" style={{ fontSize: 10.5, marginBottom: 6 }}>{PERIOD_LABEL[p]}</div>
+          <div className="row" style={{ gap: 8 }}>
+            <Icon name="ListOrdered" size={18} color="var(--primary)" />
+            <h3 style={{ margin: 0 }}>Régua de Contato dos SDRs</h3>
+          </div>
+          <p className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+            Um passo por dia desde a distribuição do card (Dia 0). Cada passo nasce pro SDR no dia exato em que
+            vence. Clique nos ícones pra escolher os canais de cada passo.
+          </p>
+        </div>
+
+        {/* Legenda dos ícones — os botões de canal abaixo não têm texto, só o ícone */}
+        <div className="row" style={{ gap: 14, flexWrap: 'wrap', padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 8 }}>
+          {SDR_ACTIVITY_TYPES.map(type => {
+            const cfg = ACTIVITY_TYPE_CONFIG[type];
+            return (
+              <div key={type} className="row" style={{ gap: 5 }}>
+                <Icon name={cfg.icon} size={13} color={cfg.color} />
+                <span style={{ fontSize: 11.5, color: 'var(--text-2)' }}>{cfg.label}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {steps.map((step, i) => (
+            <div key={i} className="row" style={{ gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, flexWrap: 'wrap' }}>
+              <div className="field" style={{ margin: 0 }}>
+                <div className="label" style={{ fontSize: 10 }}>Dia</div>
                 <input
                   className="input"
-                  type="time"
-                  value={periodTimes[p]}
-                  onChange={e => setPeriodTimes(prev => ({ ...prev, [p]: e.target.value }))}
-                  style={{ textAlign: 'center' }}
+                  type="number"
+                  min={0}
+                  max={MAX_STEP_DAY_OFFSET}
+                  value={step.dayOffset}
+                  onChange={e => updateStep(i, { dayOffset: Number(e.target.value) })}
+                  style={{ width: 68, textAlign: 'center' }}
                 />
               </div>
-            ))}
-          </div>
+
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                {SDR_ACTIVITY_TYPES.map(type => {
+                  const cfg = ACTIVITY_TYPE_CONFIG[type];
+                  const active = step.types.includes(type);
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      title={cfg.label}
+                      onClick={() => toggleStepType(i, type)}
+                      style={{
+                        width: 28, height: 28, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: active ? cfg.bg : 'var(--bg-2)',
+                        border: `1.5px solid ${active ? cfg.color : 'var(--border)'}`,
+                        opacity: active ? 1 : 0.5,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Icon name={cfg.icon} size={14} color={active ? cfg.color : 'var(--text-2)'} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              <input
+                className="input"
+                placeholder={step.types.length ? step.types.map(t => ACTIVITY_TYPE_CONFIG[t].label).join(' + ') : 'Rótulo do passo'}
+                value={step.label}
+                onChange={e => updateStep(i, { label: e.target.value })}
+                style={{ flex: 1, minWidth: 140 }}
+              />
+
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => removeStep(i)}
+                title="Remover passo"
+                style={{ flexShrink: 0 }}
+              >
+                <Icon name="Trash2" size={15} color="#B91C1C" />
+              </button>
+            </div>
+          ))}
         </div>
 
-        {/* Linhas por canal */}
-        <div>
-          <div className="fl" style={{ marginBottom: 8 }}>Ordem de execução e quando cada canal vence</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {sequence.map((step, i) => {
-              const cfg = ACTIVITY_TYPE_CONFIG[step.type];
-              return (
-                <div key={step.type} className="row" style={{ gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button className="icon-btn" style={{ width: 22, height: 16 }} disabled={i === 0} onClick={() => moveStep(i, -1)} aria-label="Mover pra cima">
-                      <Icon name="ChevronUp" size={13} />
-                    </button>
-                    <button className="icon-btn" style={{ width: 22, height: 16 }} disabled={i === sequence.length - 1} onClick={() => moveStep(i, 1)} aria-label="Mover pra baixo">
-                      <Icon name="ChevronDown" size={13} />
-                    </button>
-                  </div>
-                  <div style={{ width: 26, height: 26, borderRadius: 7, background: cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Icon name={cfg.icon} size={14} color={cfg.color} />
-                  </div>
-                  <span style={{ fontSize: 13, fontWeight: 600, minWidth: 80 }}>{cfg.label}</span>
-                  <select
-                    className="input" style={{ maxWidth: 130 }}
-                    value={step.dayOffset}
-                    onChange={e => updateStep(i, { dayOffset: Number(e.target.value) })}
-                  >
-                    {DAY_OFFSET_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <select
-                    className="input" style={{ maxWidth: 170 }}
-                    value={step.period}
-                    onChange={e => updateStep(i, { period: e.target.value as Period })}
-                  >
-                    {(['manha', 'tarde', 'fim_dia'] as Period[]).map(p => (
-                      <option key={p} value={p}>{PERIOD_LABEL[p]} ({periodTimes[p]})</option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })}
-          </div>
-          {!isValidPeriodTimes && (
-            <p style={{ fontSize: 11.5, color: '#B91C1C', marginTop: 8 }}>Horário de período inválido — use o formato HH:mm.</p>
-          )}
-          <p className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-            {sequence.map(s => `${ACTIVITY_TYPE_CONFIG[s.type].label} → ${dayOffsetLabel(s.dayOffset).toLowerCase()} às ${periodTimes[s.period]}`).join(' · ')}
-          </p>
-          <button className="btn btn-ghost btn-sm" style={{ marginTop: 4, alignSelf: 'flex-start' }} onClick={() => setSequence(LEGACY_SEQUENCE)}>
-            <Icon name="RotateCcw" size={13} />Restaurar padrão
+        {stepsError && (
+          <p style={{ fontSize: 11.5, color: '#B91C1C', margin: 0 }}>{stepsError}</p>
+        )}
+
+        <div className="row" style={{ gap: 10 }}>
+          <button type="button" className="btn btn-outline btn-sm" onClick={addStep}>
+            <Icon name="Plus" size={14} />Adicionar passo
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSteps(DEFAULT_SDR_CADENCE_STEPS)}>
+            <Icon name="RotateCcw" size={13} />Restaurar padrão do documento
           </button>
         </div>
+
+        <p className="muted" style={{ fontSize: 11.5 }}>
+          Depois do último passo, o lead sai da régua automática — segue por tratamento manual (Standby, handoff ou perda).
+        </p>
       </div>
 
       {/* Rep */}
@@ -284,7 +291,7 @@ export default function CadenceConfigPage() {
 
       {/* Salvar */}
       <div className="row" style={{ gap: 10 }}>
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || !!stepsError} title={stepsError ?? undefined}>
           <Icon name="Save" size={15} />
           {saving ? 'Salvando...' : 'Salvar configuração'}
         </button>

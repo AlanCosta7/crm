@@ -10,10 +10,13 @@ import {
   calcNewCards,
   calcCompletionRate,
   getTodayBRT,
+  daysBetweenBRT,
   SDR_ACTIVITY_TYPES,
   ACTIVITY_TYPE_CONFIG,
-  contactDayOffsets,
-  followUpForDay,
+  DEFAULT_SDR_CADENCE_STEPS,
+  findCadenceStep,
+  normalizeSteps,
+  missingCadenceTypesForDeal,
   groupActivitiesByType,
   dayOffsetLabel,
   type CadenceCard,
@@ -99,6 +102,29 @@ describe('getTodayBRT — data em fuso de Brasília', () => {
   });
 });
 
+// ── daysBetweenBRT ────────────────────────────────────────────────────────────
+describe('daysBetweenBRT — dias corridos entre duas datas (calendário BRT)', () => {
+  it('mesma data → 0 dias', () => {
+    const d = new Date('2026-08-27T14:00:00Z');
+    expect(daysBetweenBRT(d, d)).toBe(0);
+  });
+
+  it('1 dia de diferença → 1', () => {
+    expect(daysBetweenBRT(new Date('2026-08-27T14:00:00Z'), new Date('2026-08-28T14:00:00Z'))).toBe(1);
+  });
+
+  it('atribuído tarde da noite BRT ainda conta como o mesmo dia até virar a data', () => {
+    // 2026-08-27 23:30 BRT (26:30 UTC do dia 27 = 02:30 UTC do dia 28)
+    const assignedAt = new Date('2026-08-28T02:30:00Z');
+    // Ainda 27/08 às 23:59 BRT
+    const stillSameDay = new Date('2026-08-28T02:59:00Z');
+    expect(daysBetweenBRT(assignedAt, stillSameDay)).toBe(0);
+    // Virou 28/08 00:01 BRT
+    const nextDay = new Date('2026-08-28T03:01:00Z');
+    expect(daysBetweenBRT(assignedAt, nextDay)).toBe(1);
+  });
+});
+
 // ── Tipos de atividade ────────────────────────────────────────────────────────
 describe('SDR_ACTIVITY_TYPES', () => {
   it('contém exatamente 4 tipos', () => {
@@ -153,55 +179,110 @@ describe('Cenários de distribuição diária', () => {
   });
 });
 
-// ── Cadência semanal decrescente (Observações do cliente, jul/2026) ──────────
-describe('contactDayOffsets', () => {
-  it('3 contatos → dias 2, 4 e 6 da semana', () => {
-    expect(contactDayOffsets(3)).toEqual([2, 4, 6]);
+// ── Régua SDR — padrão do documento + edição pela gestão (27/08/2026) ────────
+describe('DEFAULT_SDR_CADENCE_STEPS / findCadenceStep', () => {
+  it('9 passos, de D0 a D+29', () => {
+    expect(DEFAULT_SDR_CADENCE_STEPS).toHaveLength(9);
+    expect(DEFAULT_SDR_CADENCE_STEPS.map(s => s.dayOffset)).toEqual([0, 1, 3, 5, 8, 12, 17, 23, 29]);
   });
-  it('2 contatos → dias 3 e 6', () => {
-    expect(contactDayOffsets(2)).toEqual([3, 6]);
+  it('D0: contato inicial (ligação, e-mail, LinkedIn)', () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 0)?.types).toEqual(['call', 'email', 'linkedin']);
   });
-  it('1 contato → dia 4 (meio da semana)', () => {
-    expect(contactDayOffsets(1)).toEqual([4]);
+  it('D+1: WhatsApp', () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 1)?.types).toEqual(['whatsapp']);
   });
-  it('0 contatos → nenhum dia', () => {
-    expect(contactDayOffsets(0)).toEqual([]);
+  it('dia sem passo definido → undefined', () => {
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 2)).toBeUndefined();
+    expect(findCadenceStep(DEFAULT_SDR_CADENCE_STEPS, 30)).toBeUndefined();
   });
 });
 
-describe('followUpForDay — régua 3/2/1 por semana', () => {
-  it('dia 0 (distribuição) não gera follow-up', () => {
-    expect(followUpForDay(0)).toBeNull();
+describe('normalizeSteps — régua editável pela gestão', () => {
+  it('ausente/vazia cai pro padrão do documento', () => {
+    expect(normalizeSteps(undefined)).toEqual(DEFAULT_SDR_CADENCE_STEPS);
+    expect(normalizeSteps([])).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
-  it('dia 2 → semana 1, contato 1', () => {
-    expect(followUpForDay(2)).toEqual({ week: 1, contactIndex: 1 });
+  it('aceita uma régua customizada válida, ordenada por dia', () => {
+    const raw = [
+      { dayOffset: 3, types: ['email'], label: 'Depois' },
+      { dayOffset: 0, types: ['call'], label: 'Início' },
+    ];
+    expect(normalizeSteps(raw)).toEqual([
+      { dayOffset: 0, types: ['call'], label: 'Início' },
+      { dayOffset: 3, types: ['email'], label: 'Depois' },
+    ]);
   });
-  it('dia 4 → semana 1, contato 2', () => {
-    expect(followUpForDay(4)).toEqual({ week: 1, contactIndex: 2 });
+  it('sem passo no dia 0 cai pro padrão', () => {
+    expect(normalizeSteps([{ dayOffset: 1, types: ['call'], label: 'A' }])).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
-  it('dia 6 → semana 1, contato 3', () => {
-    expect(followUpForDay(6)).toEqual({ week: 1, contactIndex: 3 });
+  it('dois passos no mesmo dia cai pro padrão', () => {
+    const raw = [
+      { dayOffset: 0, types: ['call'], label: 'A' },
+      { dayOffset: 0, types: ['email'], label: 'B' },
+    ];
+    expect(normalizeSteps(raw)).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
-  it('dia 3 → não é dia de contato na semana 1', () => {
-    expect(followUpForDay(3)).toBeNull();
+  it('passo sem canal válido cai pro padrão', () => {
+    expect(normalizeSteps([{ dayOffset: 0, types: [], label: 'A' }])).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
-  it('dia 10 → semana 2, contato 1 (offset 3 da semana)', () => {
-    expect(followUpForDay(10)).toEqual({ week: 2, contactIndex: 1 });
+});
+
+// ── missingCadenceTypesForDeal — montagem da cadência sem esperar o motor ────
+// (useCadencia/ensureTodaySteps, pedido do Alan 27/08/2026: deal atribuído
+// manualmente ao SDR não deve esperar o cron do dia seguinte pra ganhar as
+// activities do passo devido hoje).
+describe('missingCadenceTypesForDeal', () => {
+  const NOW = new Date('2026-08-27T12:00:00Z'); // 27/08 09:00 BRT
+  const assignedToday = new Date('2026-08-27T11:00:00Z'); // mesmo dia BRT
+
+  it('deal recém-atribuído (dia 0) sem nenhuma activity ainda → os 3 canais do D0', () => {
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedToday }, new Set(), NOW);
+    expect(missing.sort()).toEqual(['call', 'email', 'linkedin'].sort());
   });
-  it('dia 13 → semana 2, contato 2 (offset 6 da semana)', () => {
-    expect(followUpForDay(13)).toEqual({ week: 2, contactIndex: 2 });
+
+  it('já tem 2 dos 3 canais do D0 → só falta o terceiro', () => {
+    const existing = new Set<'call' | 'email' | 'linkedin' | 'whatsapp'>(['call', 'email']);
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedToday }, existing as any, NOW);
+    expect(missing).toEqual(['linkedin']);
   });
-  it('dia 18 → semana 3, contato único (offset 4 da semana)', () => {
-    expect(followUpForDay(18)).toEqual({ week: 3, contactIndex: 1 });
+
+  it('já tem todos os canais do passo de hoje → nada faltando (idempotente)', () => {
+    const existing = new Set<any>(['call', 'email', 'linkedin']);
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedToday }, existing, NOW);
+    expect(missing).toEqual([]);
   });
-  it('dia 22+ → régua encerrada, sem follow-up', () => {
-    expect(followUpForDay(22)).toBeNull();
-    expect(followUpForDay(30)).toBeNull();
+
+  it('hoje não é dia de contato pra esse deal (ex.: dia 2) → nada', () => {
+    const assignedTwoDaysAgo = new Date('2026-08-25T11:00:00Z');
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedTwoDaysAgo }, new Set(), NOW);
+    expect(missing).toEqual([]);
   });
-  it('respeita régua customizada da gestão ([1, 1])', () => {
-    expect(followUpForDay(4, [1, 1])).toEqual({ week: 1, contactIndex: 1 });
-    expect(followUpForDay(11, [1, 1])).toEqual({ week: 2, contactIndex: 1 });
-    expect(followUpForDay(18, [1, 1])).toBeNull();
+
+  it('deal em handoff (já passou o bastão) → nada, mesmo sendo dia 0', () => {
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedToday, handoffStatus: 'accepted' }, new Set(), NOW);
+    expect(missing).toEqual([]);
+  });
+
+  it('deal em Standby (prospect respondeu) → nada, mesmo sendo dia 0', () => {
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedToday, standbyActive: true }, new Set(), NOW);
+    expect(missing).toEqual([]);
+  });
+
+  it('sem assignedAt (legado) → nada, não inventa um dia 0', () => {
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: null }, new Set(), NOW);
+    expect(missing).toEqual([]);
+  });
+
+  it('D+1 (amanhã do assignedAt) → só WhatsApp', () => {
+    const assignedYesterday = new Date('2026-08-26T11:00:00Z');
+    const missing = missingCadenceTypesForDeal(DEFAULT_SDR_CADENCE_STEPS, { assignedAt: assignedYesterday }, new Set(), NOW);
+    expect(missing).toEqual(['whatsapp']);
+  });
+
+  it('respeita uma régua customizada, não só o padrão do documento', () => {
+    const customSteps = [{ dayOffset: 0, types: ['call' as const], label: 'Só ligação' }];
+    const missing = missingCadenceTypesForDeal(customSteps, { assignedAt: assignedToday }, new Set(), NOW);
+    expect(missing).toEqual(['call']);
   });
 });
 
