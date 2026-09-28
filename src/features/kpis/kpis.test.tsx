@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { KPIsPage } from './KPIsPage';
 
 // Mock react-router-dom
@@ -93,6 +93,35 @@ describe('KPIsPage - Filtros, Papéis e Consolidação de Métricas', () => {
     expect(screen.getByText('Meetings Agendados')).toBeInTheDocument();
     expect(screen.getByText('Visitas Agendadas')).toBeInTheDocument();
     expect(screen.getByText('Moedas do Ciclo')).toBeInTheDocument();
+  });
+
+  it('SDR: Meetings conta atividades de reunião do período, e Visitas conta deals em etapa de visita', () => {
+    mockUser.role = 'sdr';
+    mockUser.uid = 'sdr-001';
+    mockUser.name = 'João SDR';
+    const agora = { toDate: () => new Date() };
+    const antigo = { toDate: () => new Date(Date.now() - 400 * 86_400_000) };
+
+    mockDeals = [
+      // Handoff criado agora (tem visitType/visitScheduledAt) mas fora de etapa de
+      // visita: o cálculo antigo contava como reunião E como visita.
+      { id: 'd-h', name: 'H', value: 0, stage: 'proposta_apresentada', status: 'open', productId: 'wizmart', assignedSdrId: 'sdr-001', visitType: 'presential', visitScheduledAt: agora, createdAt: agora, updatedAt: agora },
+      // Card antigo que está hoje em degustação: o cálculo antigo ignorava.
+      { id: 'd-dg', name: 'DG', value: 0, stage: 'degustacao_agendada', status: 'open', productId: 'smart_cafe', assignedSdrId: 'sdr-001', createdAt: antigo, updatedAt: agora },
+      { id: 'd-v', name: 'V', value: 0, stage: 'visita_agendada', status: 'open', productId: 'wizmart', assignedSdrId: 'sdr-001', createdAt: agora, updatedAt: agora },
+    ];
+    mockActivities = [
+      { id: 'm1', type: 'meeting', status: 'pending', userId: 'sdr-001', productId: 'wizmart', createdAt: agora },
+      { id: 'm2', type: 'meeting', status: 'pending', userId: 'sdr-001', productId: 'wizmart', createdAt: agora },
+      { id: 'm-antiga', type: 'meeting', status: 'completed', userId: 'sdr-001', productId: 'wizmart', createdAt: antigo },
+      { id: 'c1', type: 'call', status: 'completed', userId: 'sdr-001', productId: 'wizmart', createdAt: agora },
+    ];
+
+    render(<KPIsPage />);
+
+    const card = (label: string) => screen.getByText(label).closest('.card') as HTMLElement;
+    expect(within(card('Meetings Agendados')).getByText('2')).toBeInTheDocument();
+    expect(within(card('Visitas Agendadas')).getByText('2')).toBeInTheDocument();
   });
 
   it('deve renderizar a visão de Gestão e os filtros se o usuário for master ou manager', () => {

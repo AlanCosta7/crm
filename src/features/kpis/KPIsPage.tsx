@@ -80,19 +80,27 @@ function StatCard({ label, value, sub, trend, icon, themeColor }: StatCardProps)
 // Modal de geração de link de TV
 interface GenLinkModalProps {
   onClose: () => void;
-  onGenerate: (deviceName: string, allowedMetrics: string[], duration: string, productId: string) => void;
+  onGenerate: (deviceName: string, allowedMetrics: string[], duration: string, productId: string, rankingPeriod: string) => void;
 }
 
 function GenLinkModal({ onClose, onGenerate }: GenLinkModalProps) {
   const [deviceName, setDeviceName] = useState('TV Recepção');
   const [duration, setDuration] = useState('30 dias');
   const [productId, setProductId] = useState('all');
+  const [rankingPeriod, setRankingPeriod] = useState('week');
   const [metrics, setMetrics] = useState<Record<string, boolean>>({
     meta_pct: true,
     ganhos_hoje_count: true,
     tarefas: true,
     ranking_pontos: true,
     ranking_moedas: false,
+    // Reuniões e visitas do mês com quebra Inbound/Outbound (slides 2 e 10 do
+    // deck "Desenho CRM"). Ligada por padrão: é número operacional, não
+    // financeiro — diferente de `financeiro_real`.
+    agenda_origem: true,
+    // Ranking do Time de SDRs (PLANO_DESENHO_CRM_2). Desligada por padrão: mostra
+    // o primeiro nome de cada SDR num nó público — o admin liga de propósito.
+    ranking_sdr: false,
     financeiro_real: false // Desativado por padrão para TVs públicas!
   });
 
@@ -102,7 +110,7 @@ function GenLinkModal({ onClose, onGenerate }: GenLinkModalProps) {
 
   const handleGen = () => {
     const selected = Object.keys(metrics).filter(k => metrics[k]);
-    onGenerate(deviceName, selected, duration, productId);
+    onGenerate(deviceName, selected, duration, productId, rankingPeriod);
   };
 
   return (
@@ -148,6 +156,19 @@ function GenLinkModal({ onClose, onGenerate }: GenLinkModalProps) {
           </div>
 
           <div>
+            {metrics.ranking_sdr && (
+              <div className="field" style={{ margin: '0 0 14px' }}>
+                <div className="fl">Período inicial do Ranking de SDRs</div>
+                <select className="input" value={rankingPeriod} onChange={e => setRankingPeriod(e.target.value)}>
+                  <option value="day">Dia</option>
+                  <option value="week">Semana</option>
+                  <option value="month">Mês</option>
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Quem estiver na TV pode alternar entre Dia, Semana e Mês no próprio painel.
+                </div>
+              </div>
+            )}
             <div className="label" style={{ marginBottom: 8, fontSize: 12 }}>Métricas Habilitadas no Canal</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[
@@ -156,6 +177,8 @@ function GenLinkModal({ onClose, onGenerate }: GenLinkModalProps) {
                 ['tarefas', 'Exibir Progresso das Tarefas', 'Contagem de atividades concluídas hoje.'],
                 ['ranking_pontos', 'Exibir Leaderboard de Pontos', 'Pódio e classificação de pontuação comercial.'],
                 ['ranking_moedas', 'Exibir Leaderboard de Moedas', 'Pódio e classificação de moedas acumuladas.'],
+                ['agenda_origem', 'Exibir Reuniões e Visitas do Mês', 'Contagem do mês com a quebra Inbound / Outbound.'],
+                ['ranking_sdr', 'Exibir Ranking do Time de SDRs', 'Pódio por visitas agendadas, com atividades e reuniões. Mostra o primeiro nome de cada SDR. Sozinha, ocupa a TV inteira.'],
                 ['financeiro_real', 'Exibir Valores Financeiros Reais (R$)', '⚠️ ALTO RISCO: Exibe faturamento explícito (R$) na TV pública.']
               ].map(([k, label, desc]) => (
                 <label key={k} className="row" style={{ gap: 10, cursor: 'pointer', alignItems: 'flex-start' }}>
@@ -327,9 +350,12 @@ export function KPIsPage() {
     const totalDoneActs = periodActs.filter(a => a.status === 'completed').length;
     const cadenceCompletion = Math.round((totalDoneActs / Math.max(1, periodActs.length)) * 100);
 
-    // Reuniões e visitas agendadas
-    const meetingsScheduled = createdDeals.filter(d => d.visitType).length;
-    const visitsScheduled = createdDeals.filter(d => d.visitScheduledAt).length;
+    // Reuniões e visitas agendadas — mesmas regras do Dashboard e do kpiAggregator:
+    // reunião é ATIVIDADE `meeting` do período; visita é deal hoje em etapa de visita.
+    // (Antes "reuniões" eram deals criados no período com `visitType`, isto é,
+    // handoffs; e visitas ignoravam todo card criado antes do período.)
+    const meetingsScheduled = periodActs.filter(a => a.type === 'meeting').length;
+    const visitsScheduled = fDeals.filter(d => ['visita_agendada', 'degustacao_agendada', 'degustacao_realizada'].includes(d.stage)).length;
     const visitsDone = wonDeals.filter(d => d.visitDoneAt).length;
     const proposalsPresented = fDeals.filter(d => d.stage === 'proposta' || d.stage === 'proposta_ap').length;
     const contractsSigned = wonDeals.filter(d => d.stage === 'contrato' || d.status === 'won').length;
@@ -426,8 +452,12 @@ export function KPIsPage() {
   }, [deals, productFilter, activeSellerId]);
 
   // ── Ações de Links de TV ──
-  const handleGenerateLink = async (deviceName: string, allowedMetrics: string[], duration: string, productId: string) => {
-    const token = 'tv_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+  const handleGenerateLink = async (deviceName: string, allowedMetrics: string[], duration: string, productId: string, rankingPeriod: string = 'week') => {
+    // O nó `/public_tv/{token}` é público: o token é o único segredo. 128 bits
+    // de `crypto` — `Math.random` era previsível e agora o nó pode ter nomes.
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const token = 'tv_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
     const now = new Date();
     let expires = 'Nunca expira';
     if (duration !== 'Nunca expira') {
@@ -444,7 +474,8 @@ export function KPIsPage() {
       expires,
       active: true,
       allowedMetrics,
-      productId
+      productId,
+      rankingPeriod
     };
 
     try {
@@ -1052,7 +1083,7 @@ export function KPIsPage() {
                                 className={`badge ${m === 'financeiro_real' ? 'badge-danger' : 'badge-accent'}`}
                                 style={{ fontSize: 9.5 }}
                               >
-                                {m === 'financeiro_real' ? 'Finanças' : m === 'meta_pct' ? 'Metas %' : m === 'ranking_pontos' ? 'Pontos' : m === 'ranking_moedas' ? 'Moedas' : m === 'ganhos_hoje_count' ? 'Ganhos' : 'Tarefas'}
+                                {m === 'financeiro_real' ? 'Finanças' : m === 'meta_pct' ? 'Metas %' : m === 'ranking_pontos' ? 'Pontos' : m === 'ranking_moedas' ? 'Moedas' : m === 'ganhos_hoje_count' ? 'Ganhos' : m === 'agenda_origem' ? 'Agenda' : m === 'ranking_sdr' ? 'SDRs' : 'Tarefas'}
                               </span>
                             ))}
                           </div>
