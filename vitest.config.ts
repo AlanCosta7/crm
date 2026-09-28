@@ -8,5 +8,8 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./src/setupTests.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // Testes de UI com Testing Library + happy-dom digitam tecla a tecla e
+    // montam árvores grandes; 5s (padrão) estoura sem que nada esteja errado.
+    testTimeout: 15000,
   },
 });

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WizMart CRM · Guia do Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --accent-text:#415400; --accent-light:#F3F8DC;
+    --danger:#DC2626; --danger-light:#FEE2E2;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --text-3:#9CA3AF; --border:#E5E7EB;
+    --radius:14px; --shadow:0 1px 3px rgba(17,25,40,.06),0 8px 24px rgba(17,25,40,.05);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif; color:var(--text); background:var(--bg); line-height:1.6; font-size:16px;}
+  h1,h2,h3,h4{font-family:'Sora','Inter',sans-serif; line-height:1.25; color:var(--text); margin:0;}
+  .wrap{max-width:860px; margin:0 auto; padding:0 28px;}
+  .cover{background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%); color:#fff; padding:96px 28px 84px; text-align:center; position:relative; overflow:hidden;}
+  .cover::after{content:""; position:absolute; right:-80px; bottom:-80px; width:320px; height:320px; background:radial-gradient(circle, rgba(141,182,0,.35), transparent 70%); border-radius:50%;}
+  .brand{display:inline-flex; align-items:center; gap:14px; margin-bottom:30px;}
+  .brand .logo{width:60px; height:60px; border-radius:16px; background:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .brand .name{font-family:'Sora'; font-weight:800; font-size:32px; letter-spacing:-.5px;}
+  .brand .name b{color:#D6F5C9;}
+  .cover h1{color:#fff; font-size:40px; font-weight:800; letter-spacing:-1px; margin:8px 0 14px; position:relative; z-index:1;}
+  .cover .sub{font-size:18px; color:#D6F5C9; font-weight:500; position:relative; z-index:1;}
+  .cover .pill{display:inline-block; margin-top:28px; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); padding:8px 18px; border-radius:100px; font-size:14px; font-weight:600; position:relative; z-index:1; backdrop-filter:blur(6px);}
+  section{padding:46px 0 8px;}
+  h2{font-size:27px; color:var(--primary); font-weight:800; margin-bottom:6px; padding-top:18px;}
+  h2 .num{display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; margin-right:12px; background:var(--primary); color:#fff; border-radius:11px; font-size:18px; vertical-align:middle;}
+  p{margin:10px 0; color:var(--text-2);}
+  strong{color:var(--text);}
+  a{color:var(--primary);}
+  .lead{font-size:18px; color:var(--text-2);}
+  ol.steps{list-style:none; counter-reset:s; padding:0; margin:18px 0;}
+  ol.steps>li{counter-increment:s; position:relative; padding:14px 0 14px 56px; border-bottom:1px dashed var(--border);}
+  ol.steps>li:last-child{border-bottom:none;}
+  ol.steps>li::before{content:counter(s); position:absolute; left:0; top:12px; width:36px; height:36px; background:var(--primary-light); color:var(--primary); font-weight:700; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:15px; border:2px solid #fff; box-shadow:0 0 0 1px var(--primary);}
+  ol.steps>li b{color:var(--text);}
+  ul.clean{margin:10px 0; padding-left:22px;}
+  ul.clean li{margin:6px 0; color:var(--text-2);}
+  .box{border-radius:var(--radius); padding:18px 20px; margin:22px 0; border:1px solid; position:relative;}
+  .box .tag{font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.6px; display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .box p{margin:6px 0;}
+  .box.rule{background:var(--primary-light); border-color:#C7E8C7;}
+  .box.rule .tag{color:var(--primary);}
+  .box.tip{background:var(--accent-light); border-color:#E2EFB0;}
+  .box.tip .tag{color:var(--accent-text);}
+  .box.warn{background:var(--danger-light); border-color:#FBC9C9;}
+  .box.warn .tag{color:var(--danger);}
+  figure.shot{margin:22px 0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); background:var(--surface);}
+  figure.shot .bar{background:var(--primary); color:#fff; font-size:13px; font-weight:600; padding:8px 14px; display:flex; align-items:center; gap:8px;}
+  figure.shot .bar .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55);}
+  figure.shot .ph{min-height:200px; background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 14px,#f1f3f5 14px,#f1f3f5 28px); display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-3); text-align:center; padding:30px;}
+  figure.shot .ph .ico{font-size:30px; margin-bottom:8px; opacity:.6;}
+  figure.shot img{display:block; width:100%;}
+  figure.shot figcaption{padding:10px 14px; font-size:13.5px; color:var(--text-2); border-top:1px solid var(--border); background:#fcfdfd;}
+  figure.shot figcaption b{color:var(--primary);}
+  .menu-ref{display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--border); border-radius:8px; padding:2px 9px; font-weight:600; font-size:13.5px; color:var(--text);}
+  footer{background:#0E2E0E; color:#9DBF9D; text-align:center; padding:34px 28px; margin-top:60px; font-size:13.5px;}
+  footer b{color:#D6F5C9;}
+  @media print{ body{background:#fff; font-size:12pt;} .cover{padding:60px 28px;} section{page-break-inside:avoid;} figure.shot,.box{page-break-inside:avoid;} }
+  @media(max-width:640px){ .cover h1{font-size:30px;} }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="brand">
+    <span class="logo">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1A6B1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/>
+        <path d="M2.5 3h2.2l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6.2"/>
+      </svg>
+    </span>
+    <span class="name">Wiz<b>Mart</b></span>
+  </div>
+  <h1>Guia do Design</h1>
+  <div class="sub">Como trabalhar a Fila de Projetos de Layout</div>
+  <div class="pill">Perfil: Design · Versão 1.0</div>
+</div>
+
+<div class="wrap">
+
+  <section id="intro">
+    <p class="lead">Seu acesso ao WizMart CRM é <strong>uma única tela</strong>: a Fila de Projetos de Layout.
+    Não há gamificação (moedas, streak, ranking) para este perfil. Leia primeiro o
+    <strong>Guia Rápido</strong> para login e navegação básica.</p>
+  </section>
+
+  <!-- 1 -->
+  <section id="fila">
+    <h2><span class="num">1</span>Como funciona a Fila de Projetos</h2>
+    <p>Sempre que alguém do time comercial (BDR, SDR ou Representante) solicita um layout de loja num negócio
+    WizMart Minimercado, o pedido cai na sua fila <span class="menu-ref">📐 Fila de Projetos</span>, com todos os
+    detalhes: tipos de PDV, quantidade de equipamentos, dimensões das paredes e observações.</p>
+    <p>A fila é <strong>FIFO</strong> — primeiro a chegar, primeiro a sair. O pedido mais antigo aparece no topo.</p>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Fila de Projetos</div>
+      <img src="assets/design-01-fila.png" alt="Fila de projetos de layout" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/design-01-fila.png</b></div>
+      <figcaption><b>O que você vê:</b> empresa, tipo de PDV, equipamentos, paredes e observações de cada pedido.</figcaption>
+    </figure>
+  </section>
+
+  <!-- 2 -->
+  <section id="pegar">
+    <h2><span class="num">2</span>Como pegar um projeto para trabalhar</h2>
+    <ol class="steps">
+      <li>Na fila <b>Aguardando</b>, escolha o pedido do topo (mais antigo).</li>
+      <li>Clique em <b>Pegar este projeto</b>.</li>
+      <li>Ele passa para a seção <b>Meu projeto em andamento</b>, no topo da tela.</li>
+    </ol>
+    <div class="box tip">
+      <div class="tag">💡 Um projeto por vez</div>
+      <p>A tela foi pensada para você focar em um pedido de cada vez antes de pegar o próximo.</p>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section id="entregar">
+    <h2><span class="num">3</span>Como marcar um projeto como entregue</h2>
+    <ol class="steps">
+      <li>No seu projeto em andamento, clique em <b>Marcar como entregue</b>.</li>
+      <li>Cole a <b>URL do arquivo entregue</b> (Google Drive, etc.).</li>
+      <li>Clique em <b>Confirmar entrega</b>.</li>
+    </ol>
+    <p>O time comercial vê a entrega automaticamente no negócio correspondente.</p>
+  </section>
+
+</div>
+
+<footer>
+  <b>WizMart CRM</b> · Guia do Design · Versão 1.0<br>
+  Documento de treinamento — uso interno do time comercial.
+</footer>
+
+</body>
+</html>

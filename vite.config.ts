@@ -25,6 +25,14 @@ export default defineConfig({
             if (id.includes('animejs')) {
               return 'animations'; // Biblioteca de animações separada
             }
+            // Pilha de markdown das notas do card — carregada sob demanda
+            // junto com a aba Notas (NotesTab é lazy no DealSidebar); sem esta
+            // regra ela cairia no 'vendor' e viria no carregamento inicial.
+            if (
+              /node_modules\/(react-markdown|remark|rehype|unified|mdast|hast|micromark|vfile|unist|property-information|space-separated-tokens|comma-separated-tokens|character-entities|decode-named-character-reference|html-url-attributes|zwitch|longest-streak|ccount|markdown-table|trim-lines|bail|is-plain-obj|trough|devlop|estree|style-to-js|style-to-object|inline-style-parser)/.test(id)
+            ) {
+              return 'markdown';
+            }
             return 'vendor'; // Demais dependências comuns
           }
         }

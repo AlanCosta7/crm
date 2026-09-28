@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WizMart CRM · Guia do Representante</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --accent-text:#415400; --accent-light:#F3F8DC;
+    --danger:#DC2626; --danger-light:#FEE2E2;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --text-3:#9CA3AF; --border:#E5E7EB;
+    --radius:14px; --shadow:0 1px 3px rgba(17,25,40,.06),0 8px 24px rgba(17,25,40,.05);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif; color:var(--text); background:var(--bg); line-height:1.6; font-size:16px;}
+  h1,h2,h3,h4{font-family:'Sora','Inter',sans-serif; line-height:1.25; color:var(--text); margin:0;}
+  .wrap{max-width:860px; margin:0 auto; padding:0 28px;}
+  .cover{background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%); color:#fff; padding:96px 28px 84px; text-align:center; position:relative; overflow:hidden;}
+  .cover::after{content:""; position:absolute; right:-80px; bottom:-80px; width:320px; height:320px; background:radial-gradient(circle, rgba(141,182,0,.35), transparent 70%); border-radius:50%;}
+  .brand{display:inline-flex; align-items:center; gap:14px; margin-bottom:30px;}
+  .brand .logo{width:60px; height:60px; border-radius:16px; background:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .brand .name{font-family:'Sora'; font-weight:800; font-size:32px; letter-spacing:-.5px;}
+  .brand .name b{color:#D6F5C9;}
+  .cover h1{color:#fff; font-size:40px; font-weight:800; letter-spacing:-1px; margin:8px 0 14px; position:relative; z-index:1;}
+  .cover .sub{font-size:18px; color:#D6F5C9; font-weight:500; position:relative; z-index:1;}
+  .cover .pill{display:inline-block; margin-top:28px; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); padding:8px 18px; border-radius:100px; font-size:14px; font-weight:600; position:relative; z-index:1; backdrop-filter:blur(6px);}
+  section{padding:46px 0 8px;}
+  h2{font-size:27px; color:var(--primary); font-weight:800; margin-bottom:6px; padding-top:18px;}
+  h2 .num{display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; margin-right:12px; background:var(--primary); color:#fff; border-radius:11px; font-size:18px; vertical-align:middle;}
+  h3{font-size:20px; margin:30px 0 10px; color:var(--text);}
+  h3::before{content:""; display:inline-block; width:8px; height:20px; background:var(--accent); border-radius:3px; margin-right:10px; vertical-align:-3px;}
+  p{margin:10px 0; color:var(--text-2);}
+  strong{color:var(--text);}
+  a{color:var(--primary);}
+  .lead{font-size:18px; color:var(--text-2);}
+  .divider{height:1px; background:var(--border); margin:36px 0;}
+  ol.steps{list-style:none; counter-reset:s; padding:0; margin:18px 0;}
+  ol.steps>li{counter-increment:s; position:relative; padding:14px 0 14px 56px; border-bottom:1px dashed var(--border);}
+  ol.steps>li:last-child{border-bottom:none;}
+  ol.steps>li::before{content:counter(s); position:absolute; left:0; top:12px; width:36px; height:36px; background:var(--primary-light); color:var(--primary); font-weight:700; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:15px; border:2px solid #fff; box-shadow:0 0 0 1px var(--primary);}
+  ol.steps>li b{color:var(--text);}
+  ul.clean{margin:10px 0; padding-left:22px;}
+  ul.clean li{margin:6px 0; color:var(--text-2);}
+  .box{border-radius:var(--radius); padding:18px 20px; margin:22px 0; border:1px solid; position:relative;}
+  .box .tag{font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.6px; display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .box p{margin:6px 0;}
+  .box.rule{background:var(--primary-light); border-color:#C7E8C7;}
+  .box.rule .tag{color:var(--primary);}
+  .box.tip{background:var(--accent-light); border-color:#E2EFB0;}
+  .box.tip .tag{color:var(--accent-text);}
+  .box.warn{background:var(--danger-light); border-color:#FBC9C9;}
+  .box.warn .tag{color:var(--danger);}
+  figure.shot{margin:22px 0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); background:var(--surface);}
+  figure.shot .bar{background:var(--primary); color:#fff; font-size:13px; font-weight:600; padding:8px 14px; display:flex; align-items:center; gap:8px;}
+  figure.shot .bar .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55);}
+  figure.shot .ph{min-height:200px; background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 14px,#f1f3f5 14px,#f1f3f5 28px); display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-3); text-align:center; padding:30px;}
+  figure.shot .ph .ico{font-size:30px; margin-bottom:8px; opacity:.6;}
+  figure.shot img{display:block; width:100%;}
+  figure.shot figcaption{padding:10px 14px; font-size:13.5px; color:var(--text-2); border-top:1px solid var(--border); background:#fcfdfd;}
+  figure.shot figcaption b{color:var(--primary);}
+  .chip{display:inline-block; background:var(--primary-light); color:var(--primary); font-weight:600; font-size:12.5px; padding:2px 9px; border-radius:6px; border:1px solid #CDEACD;}
+  .menu-ref{display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--border); border-radius:8px; padding:2px 9px; font-weight:600; font-size:13.5px; color:var(--text);}
+  table{width:100%; border-collapse:collapse; margin:18px 0; font-size:14.5px;}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border);}
+  thead th{background:var(--primary); color:#fff; font-weight:600; font-family:'Inter';}
+  thead th:first-child{border-top-left-radius:10px;}
+  thead th:last-child{border-top-right-radius:10px;}
+  tbody tr:nth-child(even){background:#fafbfc;}
+  .toc{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px 28px; margin:40px 0; box-shadow:var(--shadow);}
+  .toc h2{padding-top:0; font-size:18px; margin-bottom:14px;}
+  .toc ol{margin:0; padding-left:20px; columns:2; column-gap:36px;}
+  .toc li{margin:7px 0; color:var(--text-2);}
+  .toc a{text-decoration:none; color:var(--text-2); font-weight:500;}
+  .toc a:hover{color:var(--primary);}
+  footer{background:#0E2E0E; color:#9DBF9D; text-align:center; padding:34px 28px; margin-top:60px; font-size:13.5px;}
+  footer b{color:#D6F5C9;}
+  @media print{ body{background:#fff; font-size:12pt;} .cover{padding:60px 28px;} section{page-break-inside:avoid;} figure.shot,.box,table{page-break-inside:avoid;} .toc{break-after:page;} }
+  @media(max-width:640px){ .toc ol{columns:1;} .cover h1{font-size:30px;} }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="brand">
+    <span class="logo">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1A6B1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/>
+        <path d="M2.5 3h2.2l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6.2"/>
+      </svg>
+    </span>
+    <span class="name">Wiz<b>Mart</b></span>
+  </div>
+  <h1>Guia do Representante</h1>
+  <div class="sub">Como receber handoffs e fechar negócios — organizado por tarefa</div>
+  <div class="pill">Perfil: Representante · Versão 1.0</div>
+</div>
+
+<div class="wrap">
+
+  <section id="intro">
+    <p class="lead">Este guia é para o <strong>Representante</strong> — quem recebe os handoffs do SDR e conduz o
+    negócio até o fechamento. Leia primeiro o <strong>Guia Rápido</strong> para login, navegação e gamificação.</p>
+  </section>
+
+  <div class="toc">
+    <h2>O que você vai aprender</h2>
+    <ol>
+      <li><a href="#handoffs">Aceitar ou recusar um handoff recebido</a></li>
+      <li><a href="#sla">O prazo (SLA) de primeiro contato</a></li>
+      <li><a href="#pagina">Usar a Página do Lead</a></li>
+      <li><a href="#contrato">Anexar contrato de Comodato (Smart Café)</a></li>
+      <li><a href="#comissao">Consultar minha comissão</a></li>
+      <li><a href="#gamificacao">Minhas moedas e a loja de prêmios</a></li>
+      <li><a href="#glossario">Glossário</a></li>
+    </ol>
+  </div>
+
+  <!-- 1 HANDOFFS -->
+  <section id="handoffs">
+    <h2><span class="num">1</span>Aceitar ou recusar um handoff recebido</h2>
+    <p>Acesse <span class="menu-ref">↔️ Handoffs</span>. A aba <strong>Pendentes</strong> mostra os negócios que
+    um SDR passou para você, com canal prioritário, tipo de visita, data agendada e observações.</p>
+    <ol class="steps">
+      <li>Abra o card do handoff pendente.</li>
+      <li>Clique em <b>Aceitar handoff</b> — o negócio entra no seu pipeline (funil Hunter).</li>
+      <li>Ou clique em <b>Recusar</b> e informe o motivo (ex.: território fora da sua área, cliente já atendido por outro Rep) — o gestor é notificado.</li>
+    </ol>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Handoffs — Pendentes</div>
+      <img src="assets/rep-01-handoffs.png" alt="Tela de handoffs pendentes" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/rep-01-handoffs.png</b></div>
+      <figcaption><b>Abas:</b> Pendentes · Aceitos · Recusados.</figcaption>
+    </figure>
+  </section>
+
+  <!-- 2 SLA -->
+  <section id="sla">
+    <h2><span class="num">2</span>O prazo (SLA) de primeiro contato</h2>
+    <p>Depois de aceitar um handoff (ou concluir qualquer atividade), o sistema abre um formulário obrigatório:
+    <strong>"Qual a próxima ação?"</strong> — você não consegue sair sem preencher.</p>
+    <ol class="steps">
+      <li>Escolha o <b>tipo</b> da próxima ação (ligação, e-mail, WhatsApp).</li>
+      <li>Escolha <b>data e hora</b> — o prazo máximo é <b>hoje + 3 dias úteis</b>.</li>
+      <li>Opcional: adicione uma <b>nota</b> de contexto.</li>
+      <li>Clique em <b>Agendar próxima ação</b>.</li>
+    </ol>
+    <div class="box warn">
+      <div class="tag">⚠️ Se você não preencher</div>
+      <p>Ignorar o formulário cria automaticamente um <strong>follow-up pendente</strong> daqui a 3 dias úteis —
+      o sistema nunca deixa um negócio sem próxima ação agendada.</p>
+    </div>
+    <div class="box tip">
+      <div class="tag">💡 +1 moeda no prazo</div>
+      <p>Concluir a atividade agendada dentro do prazo vale <strong>+1 moeda</strong>.</p>
+    </div>
+  </section>
+
+  <!-- 3 PAGINA -->
+  <section id="pagina">
+    <h2><span class="num">3</span>Usar a Página do Lead</h2>
+    <p>Clique em qualquer card para abrir a página inteira do negócio, com 5 abas:</p>
+    <ul class="clean">
+      <li><strong>Visão geral</strong> — dados do negócio, contato e empresa.</li>
+      <li><strong>Produtos</strong> — itens WizMart/Smart Café vinculados a este cliente.</li>
+      <li><strong>Atividades</strong> — próximas atividades da cadência e histórico.</li>
+      <li><strong>Notas</strong> — comunicação com o SDR e registro da visita: texto (com <code>@menção</code> de colegas), <strong>foto</strong>, <strong>vídeo</strong>, <strong>áudio gravado na hora</strong> ou <strong>anexo de arquivo</strong>.</li>
+      <li><strong>Histórico</strong> — linha do tempo completa do negócio.</li>
+    </ul>
+    <div class="box tip">
+      <div class="tag">💡 Registrando uma visita</div>
+      <p>Na aba <strong>Notas</strong>, use os botões de câmera/microfone para registrar a visita na hora — foto da
+      loja, um áudio rápido contando como foi, ou um vídeo curto. Tudo fica anexado ao negócio, visível para quem
+      mais trabalha com ele (SDR, gestor).</p>
+    </div>
+  </section>
+
+  <!-- 4 CONTRATO -->
+  <section id="contrato">
+    <h2><span class="num">4</span>Anexar contrato de Comodato (Smart Café)</h2>
+    <p>Em negócios de <strong>Comodato Smart Café</strong>, o card mostra um espaço dedicado para o contrato assinado.</p>
+    <ol class="steps">
+      <li>Abra o negócio e localize o bloco de <b>Contrato</b>.</li>
+      <li>Envie o <b>PDF assinado</b> (máximo 15MB).</li>
+      <li>O status muda para <b>"Aguardando validação do financeiro"</b>.</li>
+    </ol>
+    <div class="box rule">
+      <div class="tag">📋 Regra de negócio · Comissão trava até o financeiro validar</div>
+      <p>A comissão desse negócio só é liberada quando o time <strong>Financeiro</strong> confirmar que a
+      <strong>1ª fatura foi paga</strong> pelo cliente — isso acontece na tela deles, não aqui.</p>
+    </div>
+  </section>
+
+  <!-- 5 COMISSAO -->
+  <section id="comissao">
+    <h2><span class="num">5</span>Consultar minha comissão</h2>
+    <p>Acesse <span class="menu-ref">💰 Minha Comissão</span> para ver só a sua fatia de cada negócio comissionado.</p>
+    <div class="box rule">
+      <div class="tag">📋 Regra de negócio · Percentual do Representante</div>
+      <p>No modelo padrão, você recebe <strong>17,5%</strong> do faturamento. No modelo especial da Máquina de
+      Café (quando vende com tabela de preços cheia), você recebe <strong>49%</strong>.</p>
+    </div>
+  </section>
+
+  <!-- 6 GAMIFICACAO -->
+  <section id="gamificacao">
+    <h2><span class="num">6</span>Minhas moedas e a loja de prêmios</h2>
+    <p>Acompanhe seu saldo em <span class="menu-ref">🪙 Carteira</span> e troque por prêmios em
+    <span class="menu-ref">🛍️ Loja de Prêmios</span>. Veja seu lugar no ranking em <span class="menu-ref">🏆 Leaderboard</span>.</p>
+  </section>
+
+  <!-- 7 GLOSSARIO -->
+  <section id="glossario">
+    <h2><span class="num">7</span>Glossário</h2>
+    <table>
+      <thead><tr><th>Termo</th><th>O que significa</th></tr></thead>
+      <tbody>
+        <tr><td><b>Handoff</b></td><td>Passagem do negócio do SDR para você, com dados de contexto.</td></tr>
+        <tr><td><b>SLA de 1º contato</b></td><td>Prazo (padrão 3 dias úteis) para agir após receber ou concluir uma atividade.</td></tr>
+        <tr><td><b>Comodato</b></td><td>Modelo Smart Café em que a máquina é cedida; exige contrato anexado e 1ª fatura paga.</td></tr>
+        <tr><td><b>Funil Hunter</b></td><td>O funil que você trabalha depois de aceitar um handoff.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<footer>
+  <b>WizMart CRM</b> · Guia do Representante · Versão 1.0<br>
+  Documento de treinamento — uso interno do time comercial.
+</footer>
+
+</body>
+</html>

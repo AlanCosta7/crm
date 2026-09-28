@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WizMart CRM · Guia Rápido — Primeiros Passos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --accent-text:#415400; --accent-light:#F3F8DC;
+    --danger:#DC2626; --danger-light:#FEE2E2;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --text-3:#9CA3AF; --border:#E5E7EB;
+    --radius:14px; --shadow:0 1px 3px rgba(17,25,40,.06),0 8px 24px rgba(17,25,40,.05);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif; color:var(--text); background:var(--bg); line-height:1.6; font-size:16px;}
+  h1,h2,h3,h4{font-family:'Sora','Inter',sans-serif; line-height:1.25; color:var(--text); margin:0;}
+  .wrap{max-width:860px; margin:0 auto; padding:0 28px;}
+  .cover{background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%); color:#fff; padding:96px 28px 84px; text-align:center; position:relative; overflow:hidden;}
+  .cover::after{content:""; position:absolute; right:-80px; bottom:-80px; width:320px; height:320px; background:radial-gradient(circle, rgba(141,182,0,.35), transparent 70%); border-radius:50%;}
+  .brand{display:inline-flex; align-items:center; gap:14px; margin-bottom:30px;}
+  .brand .logo{width:60px; height:60px; border-radius:16px; background:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .brand .name{font-family:'Sora'; font-weight:800; font-size:32px; letter-spacing:-.5px;}
+  .brand .name b{color:#D6F5C9;}
+  .cover h1{color:#fff; font-size:40px; font-weight:800; letter-spacing:-1px; margin:8px 0 14px; position:relative; z-index:1;}
+  .cover .sub{font-size:18px; color:#D6F5C9; font-weight:500; position:relative; z-index:1;}
+  .cover .pill{display:inline-block; margin-top:28px; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); padding:8px 18px; border-radius:100px; font-size:14px; font-weight:600; position:relative; z-index:1; backdrop-filter:blur(6px);}
+  section{padding:46px 0 8px;}
+  h2{font-size:27px; color:var(--primary); font-weight:800; margin-bottom:6px; padding-top:18px;}
+  h2 .num{display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; margin-right:12px; background:var(--primary); color:#fff; border-radius:11px; font-size:18px; vertical-align:middle;}
+  h3{font-size:20px; margin:30px 0 10px; color:var(--text);}
+  h3::before{content:""; display:inline-block; width:8px; height:20px; background:var(--accent); border-radius:3px; margin-right:10px; vertical-align:-3px;}
+  p{margin:10px 0; color:var(--text-2);}
+  strong{color:var(--text);}
+  a{color:var(--primary);}
+  .lead{font-size:18px; color:var(--text-2);}
+  .divider{height:1px; background:var(--border); margin:36px 0;}
+  ol.steps{list-style:none; counter-reset:s; padding:0; margin:18px 0;}
+  ol.steps>li{counter-increment:s; position:relative; padding:14px 0 14px 56px; border-bottom:1px dashed var(--border);}
+  ol.steps>li:last-child{border-bottom:none;}
+  ol.steps>li::before{content:counter(s); position:absolute; left:0; top:12px; width:36px; height:36px; background:var(--primary-light); color:var(--primary); font-weight:700; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:15px; border:2px solid #fff; box-shadow:0 0 0 1px var(--primary);}
+  ol.steps>li b{color:var(--text);}
+  ul.clean{margin:10px 0; padding-left:22px;}
+  ul.clean li{margin:6px 0; color:var(--text-2);}
+  .box{border-radius:var(--radius); padding:18px 20px; margin:22px 0; border:1px solid; position:relative;}
+  .box .tag{font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.6px; display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .box p{margin:6px 0;}
+  .box.rule{background:var(--primary-light); border-color:#C7E8C7;}
+  .box.rule .tag{color:var(--primary);}
+  .box.tip{background:var(--accent-light); border-color:#E2EFB0;}
+  .box.tip .tag{color:var(--accent-text);}
+  .box.warn{background:var(--danger-light); border-color:#FBC9C9;}
+  .box.warn .tag{color:var(--danger);}
+  figure.shot{margin:22px 0; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); background:var(--surface);}
+  figure.shot .bar{background:var(--primary); color:#fff; font-size:13px; font-weight:600; padding:8px 14px; display:flex; align-items:center; gap:8px;}
+  figure.shot .bar .dot{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.55);}
+  figure.shot .ph{min-height:200px; background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 14px,#f1f3f5 14px,#f1f3f5 28px); display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--text-3); text-align:center; padding:30px;}
+  figure.shot .ph .ico{font-size:30px; margin-bottom:8px; opacity:.6;}
+  figure.shot img{display:block; width:100%;}
+  figure.shot figcaption{padding:10px 14px; font-size:13.5px; color:var(--text-2); border-top:1px solid var(--border); background:#fcfdfd;}
+  figure.shot figcaption b{color:var(--primary);}
+  table{width:100%; border-collapse:collapse; margin:18px 0; font-size:14.5px;}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border);}
+  thead th{background:var(--primary); color:#fff; font-weight:600; font-family:'Inter';}
+  thead th:first-child{border-top-left-radius:10px;}
+  thead th:last-child{border-top-right-radius:10px;}
+  tbody tr:nth-child(even){background:#fafbfc;}
+  .chip{display:inline-block; background:var(--primary-light); color:var(--primary); font-weight:600; font-size:12.5px; padding:2px 9px; border-radius:6px; border:1px solid #CDEACD;}
+  .menu-ref{display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--border); border-radius:8px; padding:2px 9px; font-weight:600; font-size:13.5px; color:var(--text);}
+  .toc{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:24px 28px; margin:40px 0; box-shadow:var(--shadow);}
+  .toc h2{padding-top:0; font-size:18px; margin-bottom:14px;}
+  .toc ol{margin:0; padding-left:20px; columns:2; column-gap:36px;}
+  .toc li{margin:7px 0; color:var(--text-2);}
+  .toc a{text-decoration:none; color:var(--text-2); font-weight:500;}
+  .toc a:hover{color:var(--primary);}
+  .profile-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:18px 0;}
+  .profile-card{border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:#fff;}
+  .profile-card b{display:block; color:var(--primary); font-size:13.5px; margin-bottom:2px;}
+  .profile-card span{font-size:12.5px; color:var(--text-2);}
+  footer{background:#0E2E0E; color:#9DBF9D; text-align:center; padding:34px 28px; margin-top:60px; font-size:13.5px;}
+  footer b{color:#D6F5C9;}
+  @media print{ body{background:#fff; font-size:12pt;} .cover{padding:60px 28px;} section{page-break-inside:avoid;} figure.shot,.box,table{page-break-inside:avoid;} .toc{break-after:page;} }
+  @media(max-width:640px){ .toc ol{columns:1;} .cover h1{font-size:30px;} .profile-grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="brand">
+    <span class="logo">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1A6B1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/>
+        <path d="M2.5 3h2.2l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6.2"/>
+      </svg>
+    </span>
+    <span class="name">Wiz<b>Mart</b></span>
+  </div>
+  <h1>Guia Rápido</h1>
+  <div class="sub">Primeiros passos no WizMart CRM — vale para qualquer perfil</div>
+  <div class="pill">Todos os perfis · Versão 1.0</div>
+</div>
+
+<div class="wrap">
+
+  <section id="intro">
+    <p class="lead">Este guia cobre o que é <strong>igual para todo mundo</strong> no WizMart CRM: entrar no sistema,
+    entender a tela, trocar de produto e conhecer a gamificação. Depois de ler este guia, procure o
+    <strong>guia específico do seu perfil</strong> para as tarefas do seu dia a dia.</p>
+
+    <div class="profile-grid">
+      <div class="profile-card"><b>Admin Master</b><span>WizMart-Guia-Admin-Master.html</span></div>
+      <div class="profile-card"><b>Gestor</b><span>WizMart-Guia-Gestor.html</span></div>
+      <div class="profile-card"><b>BDR</b><span>WizMart-Guia-BDR.html</span></div>
+      <div class="profile-card"><b>SDR</b><span>WizMart-Guia-SDR.html</span></div>
+      <div class="profile-card"><b>Representante</b><span>WizMart-Guia-Representante.html</span></div>
+      <div class="profile-card"><b>Design</b><span>WizMart-Guia-Design.html</span></div>
+      <div class="profile-card"><b>Financeiro</b><span>WizMart-Guia-Financeiro.html</span></div>
+      <div class="profile-card"><b>Visualizador</b><span>WizMart-Guia-Visualizador.html</span></div>
+    </div>
+  </section>
+
+  <div class="toc">
+    <h2>O que você vai aprender</h2>
+    <ol>
+      <li><a href="#login">Como entrar no sistema</a></li>
+      <li><a href="#produto">Como trocar entre WizMart e Smart Café</a></li>
+      <li><a href="#tela">Como entender a tela</a></li>
+      <li><a href="#notif">Como funcionam as notificações</a></li>
+      <li><a href="#gamificacao">Como funcionam moedas, streak e loja de prêmios</a></li>
+      <li><a href="#ranking">Como funciona o ranking (Leaderboard)</a></li>
+      <li><a href="#glossario">Glossário rápido</a></li>
+    </ol>
+  </div>
+
+  <section id="login">
+    <h2><span class="num">1</span>Como entrar no sistema</h2>
+    <p>O sistema funciona no navegador (Chrome, Edge ou Safari), sem instalação. Você acessa pelo endereço que a empresa te enviou.</p>
+    <ol class="steps">
+      <li>Abra o navegador e digite o <b>endereço do sistema</b>.</li>
+      <li>Informe seu <b>e-mail</b> e <b>senha</b>.</li>
+      <li>Clique em <b>Entrar</b>.</li>
+    </ol>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Tela de Login</div>
+      <img src="assets/01-login.png" alt="Tela de login" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/01-login.png</b></div>
+      <figcaption><b>Onde clicar:</b> preencha e-mail e senha e clique em <b>Entrar</b>.</figcaption>
+    </figure>
+    <div class="box warn">
+      <div class="tag">⚠️ Segurança</div>
+      <p>Sua senha é pessoal e intransferível. Se esqueceu, peça ao Administrador Master para redefinir seu acesso — nunca compartilhe login.</p>
+    </div>
+  </section>
+
+  <section id="produto">
+    <h2><span class="num">2</span>Como trocar entre WizMart e Smart Café</h2>
+    <p>O CRM atende dois negócios: <strong>WizMart</strong> (varejo/distribuição) e <strong>Smart Café</strong> (café e bebidas).
+    No topo da tela existe um seletor de produto que filtra tudo que você vê — pipeline, contatos, cadência, KPIs.</p>
+    <ul class="clean">
+      <li><strong>WizMart</strong> — cor verde, funil de minimercados/PDVs.</li>
+      <li><strong>Smart Café</strong> — cor marrom/âmbar, funil de máquinas de café e snacks.</li>
+      <li><strong>Todos</strong> — mostra os dois produtos juntos (disponível para quem acompanha os dois negócios, tipicamente Master e Gestor).</li>
+    </ul>
+    <div class="box tip">
+      <div class="tag">💡 Dica</div>
+      <p>A escolha fica <strong>salva no navegador</strong> — da próxima vez que você entrar no mesmo computador, o sistema já abre no último produto usado.</p>
+    </div>
+  </section>
+
+  <section id="tela">
+    <h2><span class="num">3</span>Como entender a tela</h2>
+    <ul class="clean">
+      <li><strong>Menu lateral (esquerda):</strong> os itens que aparecem dependem do seu perfil — só o que faz parte do seu trabalho.</li>
+      <li><strong>Barra superior:</strong> seletor de produto, notificações e seu avatar (para sair do sistema).</li>
+      <li><strong>Área central:</strong> o conteúdo da tela escolhida.</li>
+    </ul>
+    <figure class="shot">
+      <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Visão geral — menu lateral</div>
+      <img src="assets/02-menu.png" alt="Visão geral - menu lateral" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+      <div class="ph" style="display:none"><div class="ico">🖼️</div>Salve o print como <b>assets/02-menu.png</b></div>
+      <figcaption><b>Dica:</b> clique no seu card de lead a qualquer momento para abrir a página inteira dele, com histórico e anexos.</figcaption>
+    </figure>
+  </section>
+
+  <section id="notif">
+    <h2><span class="num">4</span>Como funcionam as notificações</h2>
+    <p>O sino no topo da tela avisa sobre o que precisa da sua atenção: handoffs pendentes, atividades atrasadas,
+    conquistas desbloqueadas e avisos do time. Clique nele para ver a lista e marcar como lida.</p>
+    <div class="box tip">
+      <div class="tag">💡 Dica</div>
+      <p>Atividades em atraso também disparam aviso por <strong>WhatsApp</strong> automaticamente — o sistema não deixa
+      um follow-up esquecido passar despercebido.</p>
+    </div>
+  </section>
+
+  <section id="gamificacao">
+    <h2><span class="num">5</span>Como funcionam moedas, streak e loja de prêmios</h2>
+    <p>O CRM premia quem mantém a rotina em dia:</p>
+    <ul class="clean">
+      <li><strong>🪙 Moedas</strong> — você ganha ao concluir atividades no prazo (ex.: +1 moeda por atividade de cadência concluída em dia). Veja seu saldo em <span class="menu-ref">🪙 Carteira</span>.</li>
+      <li><strong>🔥 Streak</strong> — dias seguidos com atividade concluída. Streak quebra se você pular um dia.</li>
+      <li><strong>🏪 Loja de Prêmios</strong> — troque moedas acumuladas por prêmios cadastrados pela gestão, em <span class="menu-ref">🛍️ Loja de Prêmios</span>.</li>
+    </ul>
+    <div class="box rule">
+      <div class="tag">📋 Regra de negócio · Ciclo trimestral</div>
+      <p>As moedas são contadas em <strong>ciclos trimestrais</strong>. Perto do fim do ciclo, a Carteira avisa quantos dias faltam — não deixe moedas acumuladas sem trocar por prêmio.</p>
+    </div>
+  </section>
+
+  <section id="ranking">
+    <h2><span class="num">6</span>Como funciona o ranking (Leaderboard)</h2>
+    <p>Em <span class="menu-ref">🏆 Leaderboard</span> você vê o pódio do time, seu streak, seu nível de conquistas
+    e a galeria de medalhas desbloqueadas. O ranking é por pontos, calculado a partir das atividades e negócios fechados.</p>
+  </section>
+
+  <section id="glossario">
+    <h2><span class="num">7</span>Glossário rápido</h2>
+    <table>
+      <thead><tr><th>Termo</th><th>O que significa</th></tr></thead>
+      <tbody>
+        <tr><td><b>Card / Negócio (Deal)</b></td><td>Um cliente em negociação dentro do funil.</td></tr>
+        <tr><td><b>Pipeline</b></td><td>Quadro com todos os negócios organizados por etapa (Kanban).</td></tr>
+        <tr><td><b>Handoff</b></td><td>Passagem do negócio do SDR para o Representante.</td></tr>
+        <tr><td><b>Cadência</b></td><td>Sequência diária de contatos (ligação, e-mail, WhatsApp) que o SDR precisa cumprir.</td></tr>
+        <tr><td><b>Ciclo de moedas</b></td><td>Período trimestral em que as moedas ganhas são contabilizadas.</td></tr>
+        <tr><td><b>Comodato</b></td><td>Modelo Smart Café em que a máquina é cedida; comissão liberada após 1ª fatura paga.</td></tr>
+        <tr><td><b>Perfil (Role)</b></td><td>O que define o que você vê e pode fazer no sistema.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+
+<footer>
+  <b>WizMart CRM</b> · Guia Rápido — Primeiros Passos · Versão 1.0<br>
+  Documento de treinamento — uso interno do time comercial.
+</footer>
+
+</body>
+</html>

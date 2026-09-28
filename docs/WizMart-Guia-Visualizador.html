@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WizMart CRM · Guia do Visualizador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1A6B1A; --primary-hover:#114C11; --primary-light:#EBF7EB;
+    --accent:#8DB600; --accent-text:#415400; --accent-light:#F3F8DC;
+    --danger:#DC2626; --danger-light:#FEE2E2;
+    --bg:#F4F6F8; --surface:#FFFFFF; --text:#111928; --text-2:#4B5563; --text-3:#9CA3AF; --border:#E5E7EB;
+    --radius:14px; --shadow:0 1px 3px rgba(17,25,40,.06),0 8px 24px rgba(17,25,40,.05);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{margin:0; font-family:'Inter',-apple-system,system-ui,sans-serif; color:var(--text); background:var(--bg); line-height:1.6; font-size:16px;}
+  h1,h2,h3,h4{font-family:'Sora','Inter',sans-serif; line-height:1.25; color:var(--text); margin:0;}
+  .wrap{max-width:860px; margin:0 auto; padding:0 28px;}
+  .cover{background:linear-gradient(135deg,#114C11 0%,#1A6B1A 55%,#3D8B1E 100%); color:#fff; padding:96px 28px 84px; text-align:center; position:relative; overflow:hidden;}
+  .cover::after{content:""; position:absolute; right:-80px; bottom:-80px; width:320px; height:320px; background:radial-gradient(circle, rgba(141,182,0,.35), transparent 70%); border-radius:50%;}
+  .brand{display:inline-flex; align-items:center; gap:14px; margin-bottom:30px;}
+  .brand .logo{width:60px; height:60px; border-radius:16px; background:#fff; display:flex; align-items:center; justify-content:center; box-shadow:0 6px 18px rgba(0,0,0,.2);}
+  .brand .name{font-family:'Sora'; font-weight:800; font-size:32px; letter-spacing:-.5px;}
+  .brand .name b{color:#D6F5C9;}
+  .cover h1{color:#fff; font-size:40px; font-weight:800; letter-spacing:-1px; margin:8px 0 14px; position:relative; z-index:1;}
+  .cover .sub{font-size:18px; color:#D6F5C9; font-weight:500; position:relative; z-index:1;}
+  .cover .pill{display:inline-block; margin-top:28px; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); padding:8px 18px; border-radius:100px; font-size:14px; font-weight:600; position:relative; z-index:1; backdrop-filter:blur(6px);}
+  section{padding:46px 0 8px;}
+  h2{font-size:27px; color:var(--primary); font-weight:800; margin-bottom:6px; padding-top:18px;}
+  h2 .num{display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px; margin-right:12px; background:var(--primary); color:#fff; border-radius:11px; font-size:18px; vertical-align:middle;}
+  p{margin:10px 0; color:var(--text-2);}
+  strong{color:var(--text);}
+  a{color:var(--primary);}
+  .lead{font-size:18px; color:var(--text-2);}
+  ul.clean{margin:10px 0; padding-left:22px;}
+  ul.clean li{margin:6px 0; color:var(--text-2);}
+  .box{border-radius:var(--radius); padding:18px 20px; margin:22px 0; border:1px solid; position:relative;}
+  .box .tag{font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.6px; display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .box p{margin:6px 0;}
+  .box.rule{background:var(--primary-light); border-color:#C7E8C7;}
+  .box.rule .tag{color:var(--primary);}
+  .box.tip{background:var(--accent-light); border-color:#E2EFB0;}
+  .box.tip .tag{color:var(--accent-text);}
+  .box.warn{background:var(--danger-light); border-color:#FBC9C9;}
+  .box.warn .tag{color:var(--danger);}
+  table{width:100%; border-collapse:collapse; margin:18px 0; font-size:14.5px;}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border);}
+  thead th{background:var(--primary); color:#fff; font-weight:600; font-family:'Inter';}
+  thead th:first-child{border-top-left-radius:10px;}
+  thead th:last-child{border-top-right-radius:10px;}
+  tbody tr:nth-child(even){background:#fafbfc;}
+  .menu-ref{display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--border); border-radius:8px; padding:2px 9px; font-weight:600; font-size:13.5px; color:var(--text);}
+  footer{background:#0E2E0E; color:#9DBF9D; text-align:center; padding:34px 28px; margin-top:60px; font-size:13.5px;}
+  footer b{color:#D6F5C9;}
+  @media print{ body{background:#fff; font-size:12pt;} .cover{padding:60px 28px;} section{page-break-inside:avoid;} .box,table{page-break-inside:avoid;} }
+  @media(max-width:640px){ .cover h1{font-size:30px;} }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="brand">
+    <span class="logo">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1A6B1A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="21" r="1.6"/><circle cx="19" cy="21" r="1.6"/>
+        <path d="M2.5 3h2.2l2.4 12.4a1.5 1.5 0 0 0 1.5 1.2h8.7a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6.2"/>
+      </svg>
+    </span>
+    <span class="name">Wiz<b>Mart</b></span>
+  </div>
+  <h1>Guia do Visualizador</h1>
+  <div class="sub">O que você pode ver no WizMart CRM</div>
+  <div class="pill">Perfil: Visualizador · Versão 1.0</div>
+</div>
+
+<div class="wrap">
+
+  <section id="intro">
+    <p class="lead">O Visualizador é um perfil <strong>somente leitura</strong> — pensado para quem acompanha a
+    operação (sócio, investidor, consultor) sem precisar editar nada. Leia primeiro o <strong>Guia Rápido</strong>
+    para login e navegação básica.</p>
+  </section>
+
+  <section id="acesso">
+    <h2><span class="num">1</span>O que você pode ver</h2>
+    <ul class="clean">
+      <li><span class="menu-ref">🏠 Dashboard</span> — painel consolidado com os principais indicadores.</li>
+      <li><span class="menu-ref">🔀 Pipeline</span> — todos os negócios em andamento, sem poder mover cards.</li>
+      <li><span class="menu-ref">👥 Contatos</span> e <span class="menu-ref">🏢 Empresas</span> — listagem completa.</li>
+      <li><span class="menu-ref">📊 KPIs</span> — estatísticas e relatórios de performance.</li>
+    </ul>
+    <div class="box warn">
+      <div class="tag">⚠️ Sem botões de ação</div>
+      <p>Você não vê botões de criar, editar ou mover — apenas os dados. Cadência, Handoffs, Comissões,
+      Configurações e a gamificação (moedas/loja/ranking) não fazem parte deste perfil.</p>
+    </div>
+    <div class="box tip">
+      <div class="tag">💡 Precisa de mais acesso?</div>
+      <p>Se sua função exige editar algo, peça ao Administrador Master para revisar seu Cargo/Papel em
+      Configurações → Equipe & Usuários.</p>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <b>WizMart CRM</b> · Guia do Visualizador · Versão 1.0<br>
+  Documento de treinamento — uso interno do time comercial.
+</footer>
+
+</body>
+</html>

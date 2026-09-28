@@ -11,7 +11,7 @@
 | Botões/controles sem ação | **12** (incl. "Editar" do card) | **0** ativos (1 disabled+tooltip intencional) |
 | Cobertura `src/utils` (lógica de negócio) | 94% stmts | **98,5% stmts · 100% funções · 99,7% linhas** |
 | Cobertura global (incl. páginas) | ~76% | 77% stmts / 80% linhas |
-| Scanner de controles mortos | não existia | `scripts/qa-scan-dead-controls.mjs` (gate de deploy) |
+| Scanner de controles mortos | não existia | `scripts/qa/qa-scan-dead-controls.mjs` (gate de deploy) |
 
 ## 2. Achados da varredura de interações — TODOS TRATADOS
 

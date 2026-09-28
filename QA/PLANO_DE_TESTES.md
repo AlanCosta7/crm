@@ -10,7 +10,7 @@
 | Unitária | Vitest + Testing Library | Lógica pura, componentes, handlers | `npm run test -- --run` |
 | Integração (rules + CFs reais) | Emulador Firebase | Permissões, fluxos servidor | `npx firebase emulators:exec --config firebase.emutest.json --only auth,firestore,functions,database --project demo-wizmart "node scripts/<script>.mjs"` |
 | E2E navegador | Playwright | Fluxos completos por papel | `npm run test:e2e:local` (exige portas 5001/9000 livres) |
-| Estática | Scanner próprio | Botões/controles sem ação | `node scripts/qa-scan-dead-controls.mjs` |
+| Estática | Scanner próprio | Botões/controles sem ação | `node scripts/qa/qa-scan-dead-controls.mjs` |
 
 **Papéis de teste:** master, manager, bdr, sdr, rep, viewer, design — cada tela deve ser validada com o papel mais restrito que a acessa.
 
@@ -105,7 +105,7 @@ Empresas, Loja (resgate valida saldo), Carteira, Leaderboard, KPIs (filtros prod
 
 ## 4. Critério de aprovação para deploy
 1. `npm run test -- --run` → **0 falhas** (linha de base atual: 624/624).
-2. `node scripts/qa-scan-dead-controls.mjs` → 0 achados ativos (disabled+tooltip são aceitos).
+2. `node scripts/qa/qa-scan-dead-controls.mjs` → 0 achados ativos (disabled+tooltip são aceitos).
 3. Scripts de emulador → todos verdes.
 4. `npx vite build` + `npm --prefix functions run build` → sem erros.
 5. Cobertura de `src/utils` (lógica de negócio) ≥ 98% statements / 100% funções.

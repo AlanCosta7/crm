@@ -1,0 +1,19 @@
+[
+  {
+    "origin": [
+      "https://wizmart-crm.web.app",
+      "https://wizmart-crm.firebaseapp.com",
+      "http://localhost:5173"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Disposition",
+      "Content-Length",
+      "Authorization",
+      "User-Agent",
+      "x-goog-resumable"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]
