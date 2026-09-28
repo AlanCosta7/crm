@@ -303,10 +303,10 @@ export function TVPage() {
               <div key={i} className="row" style={{ gap: 12 }}>
                 <span style={{ width: 140, fontSize: 14.5, color: '#fff', fontWeight: 600 }}>{s.name}</span>
                 <div style={{ flex: 1, height: 22, background: 'rgba(255,255,255,.07)', borderRadius: 5, overflow: 'hidden' }}>
-                  <div style={{ width: `${s.pct}%`, height: '100%', background: themeColors.gradient, borderRadius: 5, transition: 'width 1s ease-in-out' }} />
+                  <div style={{ width: `${s.pct || 0}%`, height: '100%', background: themeColors.gradient, borderRadius: 5, transition: 'width 1s ease-in-out' }} />
                 </div>
                 <span style={{ width: 120, textAlign: 'right', color: themeColors.accent, fontWeight: 800, fontVariantNumeric: 'tabular-nums', fontSize: 14.5 }}>
-                  {hasFinance ? `R$ ${s.val.toLocaleString('pt-BR')}` : `${s.pct}% meta`}
+                  {hasFinance ? `R$ ${(s.val || 0).toLocaleString('pt-BR')}` : `${s.pct || 0}% meta`}
                 </span>
               </div>
             ))}
@@ -408,10 +408,10 @@ export function TVPage() {
                             {isFirst && <span style={{ marginLeft: 6 }}>👑</span>}
                           </span>
                           <span style={{ color: themeColors.textMuted, fontSize: 12, width: 110, fontWeight: 600 }}>
-                            🔥 {p.streak} dias
+                            🔥 {p.streak || 0} dias
                           </span>
                           <span style={{ fontWeight: 800, fontSize: 15, color: isFirst ? '#fff' : themeColors.accent, fontVariantNumeric: 'tabular-nums', width: 80, textAlign: 'right' }}>
-                            {p.pts.toLocaleString('pt-BR')} pts
+                            {(p.pts || 0).toLocaleString('pt-BR')} pts
                           </span>
                         </div>
                       );
