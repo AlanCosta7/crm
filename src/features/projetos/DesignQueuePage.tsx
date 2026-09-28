@@ -14,14 +14,17 @@ import { useState, useMemo } from 'react';
 import { updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useFirestoreCollection } from '../../hooks/useFirestore';
-import type { ProjectRequest } from '../../types/crm';
+import type { NoteAttachment, ProjectRequest } from '../../types/crm';
 import { Icon } from '../../components/ui/Icon';
 import { useAuthStore } from '../../stores/authStore';
+import { ProjectFilePicker } from './ProjectFilePicker';
+import { useProjectUpload } from './useProjectUpload';
+import { DELIVERY_ACCEPT } from './projectAttachments';
 
 const PDV_LABEL: Record<string, string> = {
   nanomarket:  'Nanomarket',
   micromarket: 'Micromarket',
-  store:       'Loja Física',
+  store:       'Loja',
   container:   'Container',
 };
 
@@ -33,12 +36,12 @@ function fmtDate(ts: any): string {
 
 function EquipRow({ q }: { q: ProjectRequest['quantities'] }) {
   const items = [
-    ['Gôndolas',           q.gondola],
-    ['Geladeiras',         q.fridge],
-    ['Freezer Vertical',   q.freezerVertical],
-    ['Freezer Horizontal', q.freezerHorizontal],
-    ['Luminários',         q.luminary],
-    ['Placas',             q.sign],
+    ['Gôndola',                      q.gondola],
+    ['Geladeira',                    q.fridge],
+    ['Freezer Vertical',             q.freezerVertical],
+    ['Freezer Horizontal — Picolé',  q.freezerHorizontal],
+    ['Luminária WizMart',            q.luminary],
+    ['Letreiro WizMart',             q.sign],
   ].filter(([, v]) => (v as number) > 0);
 
   if (!items.length) return <span className="muted">—</span>;
@@ -57,10 +60,12 @@ function ProjectCard({ proj, isMine, onTake, onDeliver }: {
   proj: ProjectRequest;
   isMine: boolean;
   onTake?: () => void;
-  onDeliver?: (url: string) => void;
+  onDeliver?: (d: { url: string; attachments: NoteAttachment[] }) => void;
 }) {
   const [deliverUrl, setDeliverUrl] = useState('');
   const [showDelivery, setShowDelivery] = useState(false);
+  const delivery = useProjectUpload(proj.id ?? '', 'delivery');
+  const canConfirm = !delivery.busy && (delivery.attachments.length > 0 || deliverUrl.trim().length > 0);
 
   const elapsed = useMemo(() => {
     const ts = proj.requestedAt?.toDate?.()?.getTime();
@@ -116,6 +121,21 @@ function ProjectCard({ proj, isMine, onTake, onDeliver }: {
         </div>
       )}
 
+      {/* Fotos e vídeos do local — o Design precisa ver o que o solicitante mandou */}
+      {(proj.attachments?.length ?? 0) > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div className="label" style={{ marginBottom: 6, fontSize: 11 }}>FOTOS E VÍDEOS DO LOCAL ({proj.attachments!.length})</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {proj.attachments!.map(a => (
+              <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" data-testid="anexo-solicitacao"
+                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', textDecoration: 'none' }}>
+                <Icon name={a.kind === 'video' ? 'Video' : 'Image'} size={13} /> {a.name}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Observações */}
       {proj.notes && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, background: 'var(--bg-2)', fontSize: 12.5 }}>
@@ -140,25 +160,35 @@ function ProjectCard({ proj, isMine, onTake, onDeliver }: {
           </button>
         )}
         {isMine && showDelivery && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: 1, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 260 }}>
+            <ProjectFilePicker
+              uploads={delivery.uploads}
+              onAdd={delivery.addFiles}
+              onRemove={delivery.remove}
+              accept={DELIVERY_ACCEPT}
+              label="Anexar o projeto pronto"
+              hint="PDF, imagem ou vídeo. O solicitante abre direto do card."
+            />
             <input
               className="input"
-              style={{ flex: 1, minWidth: 180 }}
-              placeholder="URL do arquivo entregue (Drive, etc.)"
+              placeholder="Ou cole um link do projeto (Drive, etc.) — opcional"
               value={deliverUrl}
               onChange={e => setDeliverUrl(e.target.value)}
             />
-            <button
-              className="btn btn-sm"
-              style={{ background: '#15803D', color: '#fff', border: 'none', flexShrink: 0 }}
-              onClick={() => onDeliver && onDeliver(deliverUrl)}
-              disabled={!deliverUrl.trim()}
-            >
-              <Icon name="Send" size={13} /> Confirmar entrega
-            </button>
-            <button className="btn btn-outline btn-sm" onClick={() => setShowDelivery(false)}>
-              Cancelar
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-sm"
+                style={{ background: '#15803D', color: '#fff', border: 'none', flexShrink: 0, opacity: canConfirm ? 1 : 0.5 }}
+                onClick={() => onDeliver && onDeliver({ url: deliverUrl.trim(), attachments: delivery.attachments })}
+                disabled={!canConfirm}
+                title={delivery.busy ? 'Aguarde o envio dos arquivos terminar' : undefined}
+              >
+                <Icon name="Send" size={13} /> {delivery.busy ? 'Enviando…' : 'Confirmar entrega'}
+              </button>
+              <button className="btn btn-outline btn-sm" onClick={() => setShowDelivery(false)}>
+                Cancelar
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -195,6 +225,7 @@ export default function DesignQueuePage() {
       await updateDoc(doc(db, 'tenants', user.tenantId, 'project_requests', proj.id), {
         status: 'in_progress',
         assignedToDesignerId: user.uid,
+        assignedToDesignerName: user.name ?? '',
         assignedAt: new Date(),
         updatedAt: new Date(),
       });
@@ -203,13 +234,15 @@ export default function DesignQueuePage() {
     }
   };
 
-  const handleDeliver = async (proj: ProjectRequest, url: string) => {
+  const handleDeliver = async (proj: ProjectRequest, d: { url: string; attachments: NoteAttachment[] }) => {
     if (!proj.id || !user) return;
     setWorking(proj.id);
     try {
       await updateDoc(doc(db, 'tenants', user.tenantId, 'project_requests', proj.id), {
         status: 'delivered',
-        deliveredFileUrl: url,
+        deliveredFileUrl: d.url,
+        deliveredAttachments: d.attachments,
+        deliveredByName: user.name ?? '',
         deliveredAt: new Date(),
         updatedAt: new Date(),
       });
@@ -253,7 +286,7 @@ export default function DesignQueuePage() {
                 key={p.id}
                 proj={p}
                 isMine
-                onDeliver={url => handleDeliver(p, url)}
+                onDeliver={d => handleDeliver(p, d)}
               />
             ))}
           </div>

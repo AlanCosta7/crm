@@ -1,7 +1,7 @@
 /**
  * ProjectRequestModal.tsx — Formulário de solicitação de projeto de layout
  *
- * Disponível apenas para BDR / SDR / Rep em deals WizMart Minimercado.
+ * Disponível para BDR / SDR / Rep do card (e gestão) em deals WizMart — ver projectAccess.ts.
  * Após submit, grava na coleção `project_requests` no Firestore.
  *
  * Campos (REQUISITOS-V3 §5):
@@ -12,12 +12,19 @@
  *  - Upload de mídias (URLs simuladas — produção: Firebase Storage)
  */
 
-import { useState } from 'react';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { useMemo, useState } from 'react';
+import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { Icon } from '../../components/ui/Icon';
+import { ProjectFilePicker } from './ProjectFilePicker';
+import { useProjectUpload } from './useProjectUpload';
+import { REQUEST_ACCEPT, MAX_REQUEST_FILES } from './projectAttachments';
 import { useAuthStore } from '../../stores/authStore';
 import type { Deal, PDVType } from '../../types/crm';
+import {
+  PDV_OPTIONS, EQUIPMENT_FIELDS, EMPTY_QUANTITIES, MAX_QTY, clampQty, hasAnyEquipment,
+  type EquipKey, type Quantities,
+} from './projectRequestForm';
 
 interface Props {
   deal: Deal;
@@ -25,34 +32,16 @@ interface Props {
   onSuccess?: () => void;
 }
 
-const PDV_OPTIONS: { id: PDVType; label: string; icon: string }[] = [
-  { id: 'nanomarket',  label: 'Nanomarket',   icon: 'Store'      },
-  { id: 'micromarket', label: 'Micromarket',  icon: 'Building'   },
-  { id: 'store',       label: 'Loja Física',  icon: 'Building2'  },
-  { id: 'container',   label: 'Container',    icon: 'Box'        },
-];
-
-const EQUIPMENT_FIELDS = [
-  { key: 'gondola',          label: 'Gôndolas',          icon: 'Layers'      },
-  { key: 'fridge',           label: 'Geladeiras',        icon: 'Refrigerator'},
-  { key: 'freezerVertical',  label: 'Freezers Verticais',icon: 'Square'      },
-  { key: 'freezerHorizontal',label: 'Freezers Horizontais',icon:'Minus'      },
-  { key: 'luminary',         label: 'Luminários',        icon: 'Lightbulb'   },
-  { key: 'sign',             label: 'Placas / Letreiros',icon: 'Tag'         },
-] as const;
-
-type EquipKey = typeof EQUIPMENT_FIELDS[number]['key'];
-
 interface FormState {
   pdvTypes: PDVType[];
-  quantities: Record<EquipKey, number>;
+  quantities: Quantities;
   walls: { wall1: string; wall2: string; wall3: string };
   notes: string;
 }
 
 const INITIAL: FormState = {
   pdvTypes: [],
-  quantities: { gondola: 0, fridge: 0, freezerVertical: 0, freezerHorizontal: 0, luminary: 0, sign: 0 },
+  quantities: { ...EMPTY_QUANTITIES },
   walls: { wall1: '', wall2: '', wall3: '' },
   notes: '',
 };
@@ -64,6 +53,14 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
   const [error, setError]   = useState('');
   const [step, setStep]     = useState<1 | 2 | 3>(1);
 
+  // O id da solicitação nasce ANTES do upload: as fotos já vão para o caminho
+  // definitivo `project_requests/{id}/request/...` (mesmo padrão das notas).
+  const requestId = useMemo(
+    () => (user ? doc(collection(db, 'tenants', user.tenantId, 'project_requests')).id : ''),
+    [user],
+  );
+  const media = useProjectUpload(requestId, 'request');
+
   const togglePdv = (id: PDVType) => {
     setForm(f => ({
       ...f,
@@ -74,7 +71,7 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
   };
 
   const setQty = (key: EquipKey, val: number) => {
-    setForm(f => ({ ...f, quantities: { ...f.quantities, [key]: Math.max(0, val) } }));
+    setForm(f => ({ ...f, quantities: { ...f.quantities, [key]: clampQty(val) } }));
   };
 
   const setWall = (k: 'wall1' | 'wall2' | 'wall3', v: string) => {
@@ -82,14 +79,14 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
   };
 
   const canNext1 = form.pdvTypes.length > 0;
-  const canNext2 = Object.values(form.quantities).some(v => v > 0);
+  const canNext2 = hasAnyEquipment(form.quantities);
 
   const handleSubmit = async () => {
     if (!user) return;
     setSaving(true);
     setError('');
     try {
-      await addDoc(collection(db, 'tenants', user.tenantId, 'project_requests'), {
+      await setDoc(doc(db, 'tenants', user.tenantId, 'project_requests', requestId), {
         dealId:          deal.id,
         companyName:     deal.company,
         requestedBy:     user.uid,
@@ -99,7 +96,8 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
         quantities:      form.quantities,
         walls:           form.walls,
         notes:           form.notes,
-        mediaUrls:       [],
+        mediaUrls:       media.attachments.map(a => a.url),
+        attachments:     media.attachments,
         status:          'pending',
         requestedAt:     serverTimestamp(),
         updatedAt:       serverTimestamp(),
@@ -208,7 +206,7 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
             <>
               <div>
                 <div className="label" style={{ marginBottom: 4 }}>Quantidade de equipamentos</div>
-                <p className="muted" style={{ fontSize: 12, marginBottom: 14 }}>Informe 0 para itens que não serão utilizados.</p>
+                <p className="muted" style={{ fontSize: 12, marginBottom: 14 }}>De 1 a {MAX_QTY} unidades por item. Deixe em 0 o que não será utilizado.</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {EQUIPMENT_FIELDS.map(f => (
                     <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 10, border: '1px solid var(--border)', background: form.quantities[f.key] > 0 ? '#F0F7F0' : 'var(--card)' }}>
@@ -217,6 +215,7 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <button
                           onClick={() => setQty(f.key, form.quantities[f.key] - 1)}
+                          aria-label={`Diminuir ${f.label}`}
                           className="icon-btn"
                           style={{ width: 28, height: 28, border: '1px solid var(--border)', borderRadius: 6 }}
                         >
@@ -225,8 +224,10 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
                         <span style={{ width: 32, textAlign: 'center', fontWeight: 700, fontSize: 14 }}>{form.quantities[f.key]}</span>
                         <button
                           onClick={() => setQty(f.key, form.quantities[f.key] + 1)}
+                          disabled={form.quantities[f.key] >= MAX_QTY}
+                          aria-label={`Aumentar ${f.label}`}
                           className="icon-btn"
-                          style={{ width: 28, height: 28, border: '1px solid var(--border)', borderRadius: 6, background: '#F0F7F0' }}
+                          style={{ width: 28, height: 28, border: '1px solid var(--border)', borderRadius: 6, background: '#F0F7F0', opacity: form.quantities[f.key] >= MAX_QTY ? 0.4 : 1 }}
                         >
                           <Icon name="Plus" size={12} />
                         </button>
@@ -269,11 +270,16 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
                 />
               </div>
               <div>
-                <div className="label" style={{ marginBottom: 6 }}>Mídias de referência</div>
-                <div style={{ padding: '16px', borderRadius: 10, border: '2px dashed var(--border)', textAlign: 'center', opacity: 0.65 }}>
-                  <Icon name="Upload" size={22} color="var(--text-3)" style={{ margin: '0 auto 8px' }} />
-                  <p className="muted" style={{ fontSize: 12, margin: 0 }}>Upload de fotos do local <span style={{ color: 'var(--text-3)' }}>(em breve)</span></p>
-                </div>
+                <div className="label" style={{ marginBottom: 6 }}>Anexar fotos e vídeos</div>
+                <ProjectFilePicker
+                  uploads={media.uploads}
+                  onAdd={media.addFiles}
+                  onRemove={media.remove}
+                  accept={REQUEST_ACCEPT}
+                  maxFiles={MAX_REQUEST_FILES}
+                  label="Adicionar fotos e vídeos do local"
+                  hint={`Até ${MAX_REQUEST_FILES} arquivos. Foto até 15 MB, vídeo até 100 MB. O Design recebe o arquivo original.`}
+                />
               </div>
               {error && <p style={{ fontSize: 12, color: '#EF4444' }}>{error}</p>}
             </>
@@ -304,12 +310,13 @@ export function ProjectRequestModal({ deal, onClose, onSuccess }: Props) {
               <button
                 className="btn btn-primary"
                 onClick={handleSubmit}
-                disabled={saving}
+                disabled={saving || media.busy}
+                title={media.busy ? 'Aguarde o envio dos arquivos terminar' : undefined}
               >
                 {saving
                   ? <Icon name="Loader2" size={14} style={{ animation: 'spin 1s linear infinite' }} />
                   : <Icon name="Send" size={14} />}
-                Enviar solicitação
+                {media.busy ? 'Enviando arquivos…' : 'Enviar solicitação'}
               </button>
             )}
           </div>

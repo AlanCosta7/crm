@@ -25,7 +25,7 @@ const STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string; bg: s
 const PDV_LABEL: Record<string, string> = {
   nanomarket:  'Nanomarket',
   micromarket: 'Micromarket',
-  store:       'Loja Física',
+  store:       'Loja',
   container:   'Container',
 };
 
@@ -182,16 +182,19 @@ export default function ProjectsPage() {
                         </div>
                       )}
                     </div>
-                    {proj.status === 'delivered' && proj.deliveredFileUrl && (
-                      <a
-                        href={proj.deliveredFileUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-outline btn-sm"
-                        style={{ alignSelf: 'flex-start' }}
-                      >
-                        <Icon name="Download" size={13} /> Baixar arquivo entregue
-                      </a>
+                    {proj.status === 'delivered' && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }} data-testid="entrega">
+                        {(proj.deliveredAttachments ?? []).map(a => (
+                          <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
+                            <Icon name="Download" size={13} /> {a.name}
+                          </a>
+                        ))}
+                        {proj.deliveredFileUrl && (
+                          <a href={proj.deliveredFileUrl} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
+                            <Icon name="ExternalLink" size={13} /> Abrir link do projeto
+                          </a>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
