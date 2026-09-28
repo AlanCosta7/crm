@@ -15,6 +15,13 @@
  * (assignedRepId || assignedSdrId || bdrId || owner), substituindo a lógica
  * hoje duplicada no client (`PipelinePage.tsx`) e em `onDealStageChanged.ts`.
  *
+ * `origin` ('inbound' | 'outbound') entrou na Fase 1.3 do PLANO_DESENHO_CRM.md:
+ * o deck pede um board único por produto, com a origem virando atributo do card
+ * em vez de funil separado. A regra de decisão está em `./dealOrigin.ts`; mora
+ * aqui, e não numa function própria, porque esta é a CF dos CAMPOS DERIVADOS do
+ * deal — um trigger a mais no mesmo documento seria uma invocação a mais por
+ * escrita, sem ganho nenhum.
+ *
  * Roda em CREATE e UPDATE (onDocumentWritten, não só quando o estágio muda —
  * diferente de `onDealStageChanged`) porque uma atribuição manual do BDR ou
  * uma revisão de porte não necessariamente move o card de estágio.
@@ -23,6 +30,7 @@
  */
 
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { computeOrigin } from "./dealOrigin";
 
 function computeParticipantIds(data: FirebaseFirestore.DocumentData): string[] {
   const raw = [data.owner, data.bdrId, data.assignedSdrId, data.assignedRepId];
@@ -49,15 +57,17 @@ export const onDealParticipantsChanged = onDocumentWritten(
     const data = after.data()!;
     const participantIds = computeParticipantIds(data);
     const responsibleId = computeResponsibleId(data);
+    const origin = computeOrigin(data);
 
     const participantsUnchanged = sameParticipantIds(data.participantIds, participantIds);
     const responsibleUnchanged = (data.responsibleId || "") === responsibleId;
-    if (participantsUnchanged && responsibleUnchanged) return;
+    const originUnchanged = data.origin === origin;
+    if (participantsUnchanged && responsibleUnchanged && originUnchanged) return;
 
     try {
-      await after.ref.update({ participantIds, responsibleId });
+      await after.ref.update({ participantIds, responsibleId, origin });
     } catch (err) {
-      console.error("[onDealParticipantsChanged] Erro ao sincronizar assinaturas:", err);
+      console.error("[onDealParticipantsChanged] Erro ao sincronizar campos derivados:", err);
     }
   }
 );

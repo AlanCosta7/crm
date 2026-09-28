@@ -6,19 +6,19 @@
  *
  * Algoritmo por SDR ativo (REQUISITOS-V2.md §6 + documento "Cadência Comercial
  * SDRs do Dia 1 ao Dia 30", confirmado com o Alan em 27/08/2026):
- *  1. Busca a fila de ontem → calcula taxaConclusao
- *  2. novosCards = Math.floor(max × taxa) (1º dia → max; max configurável)
- *  3. Busca próximos N deals da fila BDR por RECÊNCIA (mais novo primeiro)
- *  4. Para cada deal novo: cria as activities do passo D0 da régua
- *     (call, email, linkedin) e ancora `assignedAt` para os passos seguintes
- *  4b. Passos tardios da régua (configurável em settings/cadence.sdr.steps,
- *      padrão D+1, D+3, D+5, D+8, D+12, D+17, D+23, D+29) p/ leads já
- *      atribuídos: cada um nasce no dia exato em que vence, olhando quantos
- *      dias fazem desde `assignedAt`.
- *      Deals em Standby (`standbyActive`) saem da régua automática — o
- *      prospect respondeu e está em tratamento personalizado.
- *  5. Escreve `cadence_queues/{sdrId}/daily/{hoje}`
- *  6. Atualiza RTDB para refresh imediato na tela
+ *  1. Busca a fila de ontem → calcula taxaConclusao (só informativa)
+ *  2. Passos tardios da régua (configurável em settings/cadence.sdr.steps,
+ *     padrão D+1, D+3, D+5, D+8, D+12, D+17, D+23, D+29) p/ leads já
+ *     atribuídos: cada um nasce no dia exato em que vence, olhando quantos
+ *     dias fazem desde `assignedAt`.
+ *     Deals em Standby (`standbyActive`) saem da régua automática — o
+ *     prospect respondeu e está em tratamento personalizado.
+ *  3. Escreve `cadence_queues/{sdrId}/daily/{hoje}`
+ *  4. Atualiza RTDB para refresh imediato na tela
+ *
+ * NÃO distribui leads: a atribuição BDR → SDR é sempre manual (AssignSdrModal,
+ * no card e no painel do BDR). Leads em `in_queue` ficam parados até alguém
+ * atribuí-los; o passo D0 da régua é criado no cliente (ensureTodaySteps).
  *
  * Idempotência: verifica se a queue de hoje já existe antes de processar.
  */
@@ -28,19 +28,19 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { ServerValue } from "firebase-admin/database";
 import {
-  calcNewCards,
   calcCompletionRate,
   getTodayBRT,
   getYesterdayBRT,
   normalizeCadenceConfig,
   findCadenceStep,
   daysBetweenBRT,
-  pickBalancedCandidates,
   type ActivityType,
   type CadenceCard,
   type CadenceConfig,
   type DailyQueue,
 } from "./cadenceUtils";
+import { blockForType, blockStartAt } from "./timeBlocks";
+import { listActiveTenantIds } from "../shared/tenants";
 
 export const dailyCadenceEngine = onSchedule(
   {
@@ -59,12 +59,11 @@ export const dailyCadenceEngine = onSchedule(
 
     console.log(`[dailyCadenceEngine] Iniciando para ${todayBRT}`);
 
-    // Busca todos os tenants ativos
-    const tenantsSnap = await db.collection("tenants").get();
+    // Busca todos os tenants ativos (ver functions/src/shared/tenants.ts —
+    // não existe documento em tenants/{tenantId}, só subcoleções)
+    const tenantIds = await listActiveTenantIds(db);
 
-    for (const tenantDoc of tenantsSnap.docs) {
-      const tenantId = tenantDoc.id;
-
+    for (const tenantId of tenantIds) {
       try {
         await processSDRsForTenant(db, rtdb, tenantId, todayBRT, yesterdayBRT);
       } catch (err) {
@@ -110,9 +109,8 @@ async function processSDRsForTenant(
 
   for (const sdrDoc of sdrsSnap.docs) {
     const sdrId = sdrDoc.id;
-    const sdrName: string = sdrDoc.data().name || "SDR";
     try {
-      await processSDR(db, rtdb, tenantId, sdrId, sdrName, todayBRT, yesterdayBRT, config);
+      await processSDR(db, rtdb, tenantId, sdrId, todayBRT, yesterdayBRT, config);
     } catch (err) {
       console.error(`[dailyCadenceEngine] Erro no SDR ${sdrId}:`, err);
     }
@@ -125,7 +123,6 @@ async function processSDR(
   rtdb: admin.database.Database,
   tenantId: string,
   sdrId: string,
-  sdrName: string,
   todayBRT: string,
   yesterdayBRT: string,
   config: CadenceConfig,
@@ -156,10 +153,6 @@ async function processSDR(
     console.log(`[dailyCadenceEngine] SDR ${sdrId}: primeiro dia — taxa = 1.0`);
   }
 
-  // 2. Calcula quantos novos cards distribuir
-  const newCardCount = calcNewCards(previousRate, config.newCardsPerDay);
-  console.log(`[dailyCadenceEngine] SDR ${sdrId}: receberá ${newCardCount} novo(s) card(s)`);
-
   const cards: CadenceCard[] = [];
   const batch = db.batch();
   const todayStart = new Date();
@@ -172,6 +165,19 @@ async function processSDR(
     cadenceType: string,
     dueAt: Date = todayStart,
   ) => {
+    // Blocos de horário (Fase 2 do PLANO_DESENHO_CRM.md, slide 6): o motor
+    // decide O QUE fazer no dia e, desde aqui, também QUANDO.
+    //
+    // `scheduledAt` passa a ser a hora do bloco do canal — é o que a fila do dia
+    // ordena e agrupa. `dueAt` continua às 23:59: se virasse o fim do bloco, a
+    // atividade das 10h ficaria "atrasada" às 11h e o activityOverdueChecker
+    // passaria a disparar notificação a cada troca de bloco.
+    //
+    // Canal sem bloco configurado cai em `blockId: null` e vai para o balde
+    // "Sem horário" da tela — visível, nunca descartado.
+    const block = blockForType(config.timeBlocks, type);
+    const scheduledAt = block ? blockStartAt(block, todayBRT) : dueAt;
+
     const actRef = db.collection(`tenants/${tenantId}/activities`).doc();
     batch.set(actRef, {
       dealId,
@@ -179,7 +185,8 @@ async function processSDR(
       type,
       cadenceType,
       status: "pending",
-      scheduledAt: dueAt,
+      scheduledAt,
+      blockId: block?.id ?? null,
       dueAt,
       coinsAwarded: 0,
       wasOnTime: false,
@@ -192,97 +199,7 @@ async function processSDR(
     return actRef.id;
   };
 
-  // Passo D0 da régua (contato inicial): normalizeCadenceConfig garante que sempre existe.
-  const day0Step = findCadenceStep(config.steps, 0)!;
-
-  // 3. Novos cards — fila BDR ordenada por RECÊNCIA dentro de cada porte (regra
-  //    de recência confirmada pelo cliente em 15/07/2026; distribuição
-  //    balanceada por porte é a Fase D3 do plano de assinaturas, 22/08/2026).
-  if (newCardCount > 0) {
-    // Pool maior que o necessário (ainda por recência) pra ter candidatos de
-    // portes diferentes pra escolher — sem isso, a regra de porte não teria
-    // margem: já pegaria só os N mais recentes antes de olhar composição.
-    const poolSize = Math.min(newCardCount * 4, 40);
-    const poolSnap = await db
-      .collection(`tenants/${tenantId}/deals`)
-      .where("status", "==", "in_queue")
-      .orderBy("createdAt", "desc")
-      .limit(poolSize)
-      .get();
-
-    // Carga atual do SDR por porte — de onde ele está mais defasado.
-    const assignedSnapForSize = await db
-      .collection(`tenants/${tenantId}/deals`)
-      .where("assignedSdrId", "==", sdrId)
-      .where("status", "==", "open")
-      .get();
-    const bySize: Record<"P" | "M" | "G", number> = { P: 0, M: 0, G: 0 };
-    for (const d of assignedSnapForSize.docs) {
-      const size = (d.data().companySizeEstimate || "M") as "P" | "M" | "G";
-      bySize[size] = (bySize[size] ?? 0) + 1;
-    }
-
-    // Candidatos em ordem de recência (poolSnap.docs preserva a ordem da
-    // query) — a escolha em si (qual porte priorizar a cada vaga) é uma
-    // função pura testada isoladamente em cadenceUtils.test.ts.
-    const candidates = poolSnap.docs.map(doc => ({
-      doc,
-      size: (doc.data().companySizeEstimate || "M") as "P" | "M" | "G",
-    }));
-    const picked = pickBalancedCandidates(candidates, newCardCount, bySize);
-
-    for (const { doc: dealDoc } of picked) {
-      const deal = dealDoc.data();
-      const activities: CadenceCard["activities"] = {};
-
-      // Só os canais do D0 (contato inicial) entram no card no momento da
-      // distribuição. Os passos seguintes da régua (D+1, D+3, D+5...) são
-      // criados pelo bloco de "passos tardios" abaixo, no dia exato em que vencem.
-      for (const type of day0Step.types) {
-        const activityId = makeActivity(dealDoc.id, deal, type, "sdr_daily", todayStart);
-        activities[type] = { type, status: "pending", activityId };
-      }
-
-      // Marca o deal como atribuído ao SDR (sai da fila BDR).
-      // assignedAt ancora os passos seguintes da régua (D+1, D+3...).
-      batch.update(dealDoc.ref, {
-        status: "open",
-        assignedSdrId: sdrId,
-        assignedAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-
-      // Rastreio da passagem de bastão BDR→SDR (Fase C do plano de assinaturas)
-      const timelineRef = db
-        .collection(`tenants/${tenantId}/deal_timeline`)
-        .doc(dealDoc.id)
-        .collection("events")
-        .doc();
-      batch.set(timelineRef, {
-        type: "bdr_to_sdr_assigned",
-        dealId: dealDoc.id,
-        sdrId,
-        bdrId: deal.bdrId || null,
-        message: `📤 Lead atribuído a ${sdrName} pelo motor de cadência`,
-        createdBy: "system",
-        createdAt: FieldValue.serverTimestamp(),
-      });
-
-      cards.push({
-        dealId: dealDoc.id,
-        contactName: deal.company || "Contato",
-        companyName: deal.company || "Empresa",
-        productId: deal.productId || "wizmart",
-        isNew: true,
-        activities,
-      });
-    }
-    if (poolSnap.empty) {
-      console.log(`[dailyCadenceEngine] SDR ${sdrId}: fila BDR vazia.`);
-    }
-  }
-
-  // 4. Passos tardios da régua (D+1, D+3, D+5, D+8, D+12, D+17, D+23,
+  // 2. Passos tardios da régua (D+1, D+3, D+5, D+8, D+12, D+17, D+23,
   //    D+29): leads já atribuídos a este SDR, olhando quantos dias fazem desde
   //    a distribuição (assignedAt). Nada é criado com antecedência — cada
   //    passo nasce no dia exato em que vence.
@@ -328,7 +245,7 @@ async function processSDR(
     });
   }
 
-  // 5. Grava a fila diária no Firestore
+  // 3. Grava a fila diária no Firestore
   const requiredCount = cards.reduce((sum, c) => sum + Object.keys(c.activities).length, 0);
   const queueDoc: Record<string, any> = {
     sdrId,
@@ -341,15 +258,11 @@ async function processSDR(
     cards,
     generatedAt: FieldValue.serverTimestamp(),
   };
-  if (newCardCount === 0) {
-    // Performance de ontem abaixo do mínimo — sem cards novos (follow-ups continuam)
-    queueDoc.blockedReason = "taxa_insuficiente";
-  }
   batch.set(todayQueueRef, queueDoc);
 
   await batch.commit();
 
-  // 6. Atualiza RTDB para refresh imediato na tela do SDR
+  // 4. Atualiza RTDB para refresh imediato na tela do SDR
   await rtdb.ref(`tenants/${tenantId}/cadence/${sdrId}`).update({
     date: todayBRT,
     cardsDistributed: cards.length,
@@ -358,5 +271,5 @@ async function processSDR(
     lastUpdated: ServerValue.TIMESTAMP,
   });
 
-  console.log(`[dailyCadenceEngine] SDR ${sdrId}: ${cards.length} card(s) distribuído(s), ${requiredCount} atividades criadas.`);
+  console.log(`[dailyCadenceEngine] SDR ${sdrId}: ${cards.length} card(s) na fila, ${requiredCount} atividades criadas.`);
 }

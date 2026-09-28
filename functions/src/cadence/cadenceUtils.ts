@@ -9,6 +9,8 @@
  *   SDR bloqueado (taxa = 0) → 0 cards
  */
 
+import { DEFAULT_TIME_BLOCKS, normalizeTimeBlocks, type TimeBlockDef } from "./timeBlocks";
+
 // ── Tipos compartilhados ──────────────────────────────────────────────────────
 
 export type ActivityType = 'email' | 'linkedin' | 'whatsapp' | 'call';
@@ -56,7 +58,7 @@ export interface DailyQueue {
 // de ligar, não um canal de contato como os outros 4.
 
 export interface CadenceStepDef {
-  /** Dias corridos desde a distribuição do card (0 = dia da distribuição). */
+  /** Dias corridos desde a atribuição do card (0 = dia da distribuição). */
   dayOffset: number;
   /** Canal(is) tocado(s) nesse dia — mais de um quando o passo combina ações. */
   types: ActivityType[];
@@ -117,18 +119,22 @@ function normalizeSteps(raw: any): CadenceStepDef[] {
 // ── Configuração de cadência (editável pela gestão em settings/cadence) ──────
 
 export interface CadenceConfig {
-  /** Máximo de cards novos por dia para o SDR (padrão 3) */
-  newCardsPerDay: number;
   /** SLA em dias úteis para o 1º contato do Rep após aceitar handoff (padrão 3) */
   repFirstContactBusinessDays: number;
-  /** Régua de contato do SDR (dias e canais desde a distribuição do card). */
+  /** Régua de contato do SDR (dias e canais desde a atribuição do card). */
   steps: CadenceStepDef[];
+  /**
+   * Blocos de horário do dia (Fase 2 do PLANO_DESENHO_CRM.md, slide 6).
+   * Padrão da empresa, definido pelo admin — não há override por SDR
+   * (decisão do Alan, 10/09/2026).
+   */
+  timeBlocks: TimeBlockDef[];
 }
 
 export const DEFAULT_CADENCE_CONFIG: CadenceConfig = {
-  newCardsPerDay: 3,
   repFirstContactBusinessDays: 3,
   steps: DEFAULT_SDR_CADENCE_STEPS,
+  timeBlocks: DEFAULT_TIME_BLOCKS,
 };
 
 /** Normaliza o doc settings/cadence (parcial/ausente) em uma config válida. */
@@ -138,23 +144,10 @@ export function normalizeCadenceConfig(raw: any): CadenceConfig {
     return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : dflt;
   };
   return {
-    newCardsPerDay: clamp(raw?.sdr?.newCardsPerDay, 0, 10, DEFAULT_CADENCE_CONFIG.newCardsPerDay),
     repFirstContactBusinessDays: clamp(raw?.rep?.firstContactBusinessDays, 1, 15, DEFAULT_CADENCE_CONFIG.repFirstContactBusinessDays),
     steps: normalizeSteps(raw?.sdr?.steps),
+    timeBlocks: normalizeTimeBlocks(raw?.sdr?.timeBlocks),
   };
-}
-
-// ── Fórmula principal ─────────────────────────────────────────────────────────
-
-/**
- * Calcula quantos novos cards o SDR receberá hoje.
- * @param rate Taxa de conclusão de ontem (0–1). null = primeiro dia.
- * @param maxCards Máximo diário (configurável; padrão 3).
- * @returns Número de cards (0–maxCards)
- */
-export function calcNewCards(rate: number | null, maxCards: number = 3): number {
-  if (rate === null) return maxCards; // Primeiro dia: recebe o máximo (taxa padrão = 1.0)
-  return Math.min(maxCards, Math.max(0, Math.floor(maxCards * rate)));
 }
 
 /** Dias corridos entre duas datas, medidos no calendário BRT. */
@@ -235,45 +228,3 @@ export const COINS_FOR_VISIT_SCHEDULED = 1;
 
 /** Moedas ganhas ao completar reunião agendada. */
 export const COINS_FOR_MEETING_DONE = 1;
-
-// ── Distribuição balanceada por porte (Fase D3 do plano de assinaturas) ──────
-
-export type CompanySize = "P" | "M" | "G";
-
-export interface SizedCandidate {
-  size: CompanySize;
-}
-
-/**
- * Escolhe `count` candidatos de `candidatesInRecencyOrder` (já ordenados do
- * mais recente pro mais antigo) priorizando, a cada vaga, o porte em que
- * `currentBySize` está mais defasado pro SDR que está recebendo. Dentro do
- * porte escolhido, mantém a ordem de recência recebida. Empate de defasagem
- * resolvido por P > M > G (equilibra as contas pequenas primeiro — mais
- * numerosas na fila em geral). Se não houver candidato do porte preferido,
- * cai pro próximo porte mais defasado; se nenhuma preferência tiver
- * candidato, pega o próximo por recência pura — nunca deixa vaga vazia só
- * por falta de um porte específico.
- *
- * Função pura — não faz I/O, só decide QUAIS candidatos (já buscados) usar.
- */
-export function pickBalancedCandidates<T extends SizedCandidate>(
-  candidatesInRecencyOrder: T[],
-  count: number,
-  currentBySize: Record<CompanySize, number>,
-): T[] {
-  const bySize: Record<CompanySize, number> = { ...currentBySize };
-  let remaining = candidatesInRecencyOrder.slice();
-  const picked: T[] = [];
-
-  for (let i = 0; i < count && remaining.length > 0; i++) {
-    const preference = (["P", "M", "G"] as CompanySize[])
-      .slice()
-      .sort((a, b) => bySize[a] - bySize[b]);
-    const chosen = preference.map(size => remaining.find(c => c.size === size)).find(Boolean) ?? remaining[0];
-    picked.push(chosen);
-    remaining = remaining.filter(c => c !== chosen);
-    bySize[chosen.size] += 1;
-  }
-  return picked;
-}

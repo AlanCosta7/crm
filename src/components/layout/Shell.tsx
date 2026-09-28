@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
+import { ImpersonationBanner } from './ImpersonationBanner';
 import { ToastContainer } from '../ui/ToastContainer';
 import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
@@ -35,32 +36,40 @@ export function Shell({ crumbs, children, scroll = true }: ShellProps) {
 
   return (
     <div className="app">
-      {/* Sidebar esquerdo fixo retrátil */}
-      <Sidebar />
+      {/* Faixa de aviso — só existe enquanto a sessão atual é uma
+          impersonação ("Visualizar como"). Fica FORA da linha
+          Sidebar+Main (que virou .app-row) para ocupar a largura toda em
+          cima, sem disputar espaço no flex row. */}
+      <ImpersonationBanner />
 
-      {/* Backdrop para fechar o sidebar no mobile ao clicar fora */}
-      {!sidebarCollapsed && (
-        <div
-          className="sidebar-backdrop"
-          onClick={toggleSidebar}
-          style={{ display: 'none' }}
-        />
-      )}
-      
-      <div className="main">
-        {/* Topbar com breadcrumbs dinâmicos e área de notificações */}
-        <Topbar crumbs={crumbs} />
-        
-        {/* Renderiza a página principal com scroll habilitado ou layout flexível */}
-        {scroll ? (
-          <div className="content">
-            {children}
-          </div>
-        ) : (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            {children}
-          </div>
+      <div className="app-row">
+        {/* Sidebar esquerdo fixo retrátil */}
+        <Sidebar />
+
+        {/* Backdrop para fechar o sidebar no mobile ao clicar fora */}
+        {!sidebarCollapsed && (
+          <div
+            className="sidebar-backdrop"
+            onClick={toggleSidebar}
+            style={{ display: 'none' }}
+          />
         )}
+
+        <div className="main">
+          {/* Topbar com breadcrumbs dinâmicos e área de notificações */}
+          <Topbar crumbs={crumbs} />
+
+          {/* Renderiza a página principal com scroll habilitado ou layout flexível */}
+          {scroll ? (
+            <div className="content">
+              {children}
+            </div>
+          ) : (
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              {children}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Container global de toasts de gamificação */}

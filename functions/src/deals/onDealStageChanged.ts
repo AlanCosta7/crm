@@ -8,11 +8,20 @@
  *  - Ao entrar em "instalacao_agendada" → incrementa KPI instalações
  *  - Mantém premiação de moedas por coinsOnEnter
  *  - Bloqueia escrita se connectionType === 'standard_proposal' e destino é visita_*
+ *
+ * Fase 3 do PLANO_DESENHO_CRM.md (slide 8):
+ *  - Ao entrar em etapa de AGENDAMENTO (reunião/visita/degustação) → quebra a
+ *    cadência diária do card e instala a régua de agenda (follow-up 3/3 dias +
+ *    confirmação 24h úteis antes).
+ *  - Ao entrar na etapa de REALIZADO, em perda, ou ao voltar atrás → cancela a
+ *    régua, para o SDR não seguir vendo "confirmar a reunião" depois dela.
  */
 
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { AGENDA_TRIGGER_STAGES } from "../cadence/agendaRuler";
+import { applyAgendaRuler, cancelAgendaRuler } from "../cadence/applyAgendaRuler";
 
 function nowMonth(): string {
   const d = new Date();
@@ -107,6 +116,42 @@ export const onDealStageChanged = onDocumentUpdated(
         await event.data!.after.ref.update(cohortPatch);
       } catch (err) {
         console.error("[onDealStageChanged] Erro ao gravar cohortKeys:", err);
+      }
+    }
+
+    // ── Régua de agenda (Fase 3 — slide 8) ───────────────────────────────────
+    //
+    // POSIÇÃO DELIBERADA: antes das escritas no Realtime Database. A régua é o
+    // que alimenta a fila de trabalho do SDR; o bloco de RTDB abaixo só atualiza
+    // contadores da TV. Uma `transaction()` no RTDB não LANÇA quando o banco está
+    // inalcançável — ela fica tentando, e o `try/catch` em volta nunca dispara.
+    // Com a régua depois dela, uma lentidão no RTDB faria o SDR ficar sem régua
+    // em silêncio. O teste de emulador expôs exatamente isso no caminho da visita
+    // (o único que incrementa `visitsScheduled`).
+    const motivoAgenda = AGENDA_TRIGGER_STAGES[newStage];
+    const motivoAnterior = AGENDA_TRIGGER_STAGES[before.stage];
+
+    if (motivoAgenda) {
+      try {
+        const r = await applyAgendaRuler(db, tenantId, dealId, after, motivoAgenda);
+        console.log(
+          `[onDealStageChanged] régua de agenda em ${dealId}: ` +
+          `${r.canceladasDaCadencia} da cadência e ${r.canceladasDaAgenda} da agenda canceladas, ` +
+          `${r.criadas} criada(s)` + (r.motivoSemRegua ? ` (sem régua: ${r.motivoSemRegua})` : ""),
+        );
+      } catch (err) {
+        console.error("[onDealStageChanged] Erro ao instalar a régua de agenda:", err);
+      }
+    } else if (motivoAnterior) {
+      // Saiu de uma etapa de agendamento — compromisso feito, lead perdido ou
+      // card movido de volta. Em qualquer um dos casos a régua perdeu sentido.
+      try {
+        const n = await cancelAgendaRuler(db, tenantId, dealId, `saiu_de_${before.stage}`);
+        if (n > 0) {
+          console.log(`[onDealStageChanged] régua de agenda de ${dealId} cancelada (${n} tarefa(s)).`);
+        }
+      } catch (err) {
+        console.error("[onDealStageChanged] Erro ao cancelar a régua de agenda:", err);
       }
     }
 

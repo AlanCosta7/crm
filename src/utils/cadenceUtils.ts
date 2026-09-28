@@ -103,12 +103,6 @@ export interface DailyQueue {
   generatedAt?: any;
 }
 
-/** Calcula novos cards. null = primeiro dia → máximo. */
-export function calcNewCards(rate: number | null, maxCards: number = 3): number {
-  if (rate === null) return maxCards;
-  return Math.min(maxCards, Math.max(0, Math.floor(maxCards * rate)));
-}
-
 /** Taxa de conclusão (0–1). Zero requeridas = 1 (não penaliza). */
 export function calcCompletionRate(completed: number, required: number): number {
   if (required <= 0) return 1;

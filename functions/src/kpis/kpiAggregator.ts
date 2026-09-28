@@ -1,5 +1,7 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
+import { computeAgendaMetrics, countVisitsByState, indexDealsById } from "./agendaMetrics";
+import { listActiveTenantIds } from "../shared/tenants";
 
 /**
  * Cloud Function agendada que roda de hora em hora.
@@ -15,10 +17,11 @@ export const kpiAggregator = onSchedule(
   },
   async () => {
     const db = admin.firestore();
-    const tenantsSnap = await db.collection("tenants").get();
+    // Ver functions/src/shared/tenants.ts — não existe documento em
+    // tenants/{tenantId}, só subcoleções.
+    const tenantIds = await listActiveTenantIds(db);
 
-    for (const tenantDoc of tenantsSnap.docs) {
-      const tenantId = tenantDoc.id;
+    for (const tenantId of tenantIds) {
       try {
         console.log(`[kpiAggregator] Iniciando agregação para o tenant: ${tenantId}`);
         await aggregateTenantKpis(tenantId);
@@ -48,6 +51,8 @@ async function aggregateTenantKpis(tenantId: string) {
   // 2. Busca negócios (deals) modificados ou ativos
   const dealsSnap = await db.collection(`tenants/${tenantId}/deals`).get();
   const deals = dealsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as any);
+  // Índice sem filtro de produto: resolve a origem das reuniões (ver agendaMetrics.ts)
+  const dealsById = indexDealsById(deals);
 
   // 3. Busca atividades deste mês
   const activitiesSnap = await db
@@ -141,14 +146,16 @@ async function aggregateTenantKpis(tenantId: string) {
       a.createdAt && a.createdAt.toDate() >= startOfToday
     ).length;
 
-    // Visitas agendadas por estado (deals em visita_agendada)
-    const visitsScheduledByState: Record<string, number> = {};
-    filteredDeals
-      .filter(d => d.stage === "visita_agendada")
-      .forEach(d => {
-        const uf = d.location?.state || "Sem UF";
-        visitsScheduledByState[uf] = (visitsScheduledByState[uf] || 0) + 1;
-      });
+    // Reuniões e visitas agendadas do tenant — mesmas regras do dashboard (agendaMetrics.ts)
+    const tenantAgenda = computeAgendaMetrics({
+      deals: filteredDeals,
+      activities: filteredActivities,
+      dealsById,
+      since: startOfMonth,
+    });
+
+    // Visitas agendadas por estado — mesma população de `visitsScheduled`
+    const visitsScheduledByState = countVisitsByState(filteredDeals);
 
     // Conquistas em PDVs (deals status=won com conquestValue)
     const conquestsPdv = filteredDeals
@@ -174,6 +181,9 @@ async function aggregateTenantKpis(tenantId: string) {
       visitsScheduledByState,
       conquestsPdv,
       installations,
+      // Total do time com quebra por origem: é o lado "time" da comparação
+      // individual × time do painel do SDR, que não pode ler os deals alheios.
+      ...tenantAgenda,
     };
 
     saveSnapshot("all", null, prod, "monthly", currentMonthStr, monthlyGeneralMetrics);
@@ -199,14 +209,20 @@ async function aggregateTenantKpis(tenantId: string) {
         const userActivities = filteredActivities.filter(a => a.userId === user.id);
         const userMonthActs = userActivities.filter(a => a.createdAt && a.createdAt.toDate() >= startOfMonth);
         const userTodayActs = userActivities.filter(a => a.createdAt && a.createdAt.toDate() >= startOfToday);
+        const sdrAgenda = computeAgendaMetrics({
+          deals: filteredDeals,
+          activities: filteredActivities,
+          dealsById,
+          since: startOfMonth,
+          sdrId: user.id,
+        });
 
         const sdrMonthlyMetrics = {
           activitiesEmail: userMonthActs.filter(a => a.type === "email" && a.status === "completed").length,
           activitiesLinkedin: userMonthActs.filter(a => a.type === "linkedin" && a.status === "completed").length,
           activitiesWhatsapp: userMonthActs.filter(a => a.type === "whatsapp" && a.status === "completed").length,
           activitiesCall: userMonthActs.filter(a => a.type === "call" && a.status === "completed").length,
-          meetingsScheduled: filteredDeals.filter(d => d.assignedSdrId === user.id && d.createdAt && d.createdAt.toDate() >= startOfMonth).length,
-          visitsScheduled: filteredDeals.filter(d => d.assignedSdrId === user.id && d.visitScheduledAt && d.visitScheduledAt.toDate() >= startOfMonth).length,
+          ...sdrAgenda,
           coinsEarned: ledger.filter(tx => tx.userId === user.id && tx.amount > 0 && tx.createdAt && tx.createdAt.toDate() >= startOfMonth).reduce((sum, tx) => sum + tx.amount, 0),
           cadenceCompletionRate: Math.round((userMonthActs.filter(a => a.status === "completed").length / Math.max(1, userMonthActs.length)) * 100),
         };

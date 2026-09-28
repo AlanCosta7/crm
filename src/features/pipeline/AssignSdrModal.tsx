@@ -1,10 +1,9 @@
 /**
  * AssignSdrModal.tsx — Atribuição manual BDR → SDR
  *
- * Fase D2 do PLANO_CARD_ASSINATURAS_VISIBILIDADE.md. Convive com a distribuição
- * automática do `dailyCadenceEngine` (cron 7h) — este modal é a via extra pro
- * BDR reagir na hora (ex.: um SDR zerou a cadência do dia e está disponível
- * pra mais cards, sem esperar o motor do dia seguinte).
+ * Fase D2 do PLANO_CARD_ASSINATURAS_VISIBILIDADE.md. É a ÚNICA via de
+ * distribuição de leads a SDRs: o `dailyCadenceEngine` não atribui mais
+ * leads automaticamente — só gera os passos da régua dos já atribuídos.
  *
  * Mesmo padrão visual do HandoffModal (SDR→Rep), mas sem os campos de visita —
  * só a seleção do SDR (ordenada por menor carga atual primeiro) e uma
@@ -77,10 +76,13 @@ export function AssignSdrModal({ deal, sdrs, workloadBySdr, onConfirm, onCancel 
   };
 
   return (
-    <div className="modal-ov" style={{ zIndex: 300 }}>
-      <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+    // Overlay `fixed` + altura limitada à tela: com muitos SDRs o modal estourava a
+    // viewport (o CSS global `.modal` não limita altura) e ficava sem rolagem —
+    // só o miolo rola, cabeçalho e rodapé ficam à vista.
+    <div className="modal-ov" style={{ position: 'fixed', zIndex: 300, padding: 16 }}>
+      <div className="modal" style={{ maxWidth: 480, width: '100%', maxHeight: 'calc(100vh - 32px)', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="modal-hd">
+        <div className="modal-hd" style={{ flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="UserPlus" size={18} color="var(--primary)" />
@@ -104,13 +106,13 @@ export function AssignSdrModal({ deal, sdrs, workloadBySdr, onConfirm, onCancel 
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="modal-bd" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+          <div className="modal-bd" style={{ display: 'flex', flexDirection: 'column', gap: 18, overflowY: 'auto', minHeight: 0, flex: 1 }}>
 
             <div className="field" style={{ margin: 0 }}>
               <div className="fl" style={{ marginBottom: 4 }}>SDR responsável *</div>
               <p className="muted" style={{ fontSize: 11.5, marginTop: 0, marginBottom: 8 }}>
-                Ordenado por menor carga do porte <strong>{COMPANY_SIZE_LABEL[dealSize]}</strong> primeiro — a cota diária automática não se aplica aqui.
+                Ordenado por menor carga do porte <strong>{COMPANY_SIZE_LABEL[dealSize]}</strong> primeiro — a atribuição é sempre manual.
               </p>
               {orderedSdrs.length === 0 ? (
                 <p className="muted" style={{ fontSize: 12.5 }}>Nenhum SDR ativo cadastrado para este produto.</p>
@@ -174,7 +176,7 @@ export function AssignSdrModal({ deal, sdrs, workloadBySdr, onConfirm, onCancel 
             </div>
           )}
 
-          <div className="modal-ft">
+          <div className="modal-ft" style={{ flexShrink: 0 }}>
             <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={saving}>
               Cancelar
             </button>

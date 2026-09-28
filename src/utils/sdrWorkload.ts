@@ -7,10 +7,8 @@
  * atribuição manual do BDR (AssignSdrModal), evitando duas contas divergentes
  * do mesmo número.
  *
- * Não é a cota diária de desempenho (`calcNewCards`/`dailyCadenceEngine`, que
- * calcula quantos cards NOVOS o SDR pode receber hoje com base na taxa de
- * conclusão de ontem) — é o contador de quantos cards o SDR JÁ TEM agora,
- * usado pra guiar uma distribuição manual justa (menor carga primeiro).
+ * É o contador de quantos cards o SDR JÁ TEM agora, usado pra guiar a
+ * distribuição manual justa (menor carga primeiro).
  */
 import type { Deal, ProductScope } from '../types/crm';
 import { matchesProductId } from './productScope';
@@ -41,13 +39,4 @@ export function getSdrWorkload(
     sdrDeals.forEach(d => { bySize[effectiveCompanySize(d)] += 1; });
     return { sdrId, leads: sdrDeals.length, bySize };
   });
-}
-
-/** Porte em que o SDR está mais defasado (menos cards) — usado pra priorizar
- * a próxima vaga na distribuição, automática ou manual. Empate resolvido por
- * P > M > G (prioriza equilibrar as contas pequenas primeiro, mais numerosas
- * na fila em geral). */
-export function mostUnderrepresentedSize(bySize: Record<CompanySizeEstimate, number>): CompanySizeEstimate {
-  const order: CompanySizeEstimate[] = ['P', 'M', 'G'];
-  return order.reduce((min, size) => (bySize[size] < bySize[min] ? size : min), order[0]);
 }

@@ -1,6 +1,7 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 import { refreshTvSnapshot } from "./tvHelper";
+import { listActiveTenantIds } from "../shared/tenants";
 
 /**
  * Cloud Function agendada que roda a cada 5 minutos.
@@ -16,10 +17,11 @@ export const tvDataRefresher = onSchedule(
   },
   async () => {
     const db = admin.firestore();
-    const tenantsSnap = await db.collection("tenants").get();
+    // Ver functions/src/shared/tenants.ts — não existe documento em
+    // tenants/{tenantId}, só subcoleções.
+    const tenantIds = await listActiveTenantIds(db);
 
-    for (const tenantDoc of tenantsSnap.docs) {
-      const tenantId = tenantDoc.id;
+    for (const tenantId of tenantIds) {
       try {
         console.log(`[tvDataRefresher] Atualizando TVs para tenant: ${tenantId}`);
         

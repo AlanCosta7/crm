@@ -5,6 +5,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { Av } from '../ui/Av';
 import { Icon } from '../ui/Icon';
 import { NotificationsBell } from './NotificationsBell';
+import { ViewAsModal } from './ViewAsModal';
 import type { ProductId, ProductScope } from '../../types/crm';
 import { allowedProductIds, canUseAllScope, ensureAllowedScope } from '../../utils/productScope';
 
@@ -46,6 +47,8 @@ export function Topbar({ crumbs }: TopbarProps) {
 
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  const [viewAsOpen, setViewAsOpen] = useState(false);
 
   const handleLogout = () => {
     useAuthStore.getState().setUser(null);
@@ -319,6 +322,31 @@ export function Topbar({ crumbs }: TopbarProps) {
                   </button>
                 )}
 
+                {user.role === 'master' && (
+                  <button
+                    onClick={() => { setViewAsOpen(true); setProfileOpen(false); }}
+                    style={{
+                      width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 16px',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: 12.5,
+                      color: 'var(--text-primary)',
+                      transition: 'background 0.12s',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                  >
+                    <Icon name="Eye" size={14} color="var(--text-2)" />
+                    <span>Visualizar como...</span>
+                  </button>
+                )}
+
                 <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
 
                 <button
@@ -350,6 +378,8 @@ export function Topbar({ crumbs }: TopbarProps) {
           <div className="sk" style={{ width: 100, height: 32, borderRadius: 8 }} />
         )}
       </div>
+
+      {viewAsOpen && <ViewAsModal onClose={() => setViewAsOpen(false)} />}
     </header>
   );
 }

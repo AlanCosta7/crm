@@ -17,18 +17,32 @@ import { doc, updateDoc, addDoc, collection } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { Icon } from '../../components/ui/Icon';
 import { useAuthStore } from '../../stores/authStore';
-import { ACTIVITY_TYPE_CONFIG, type ActivityType } from '../../utils/cadenceUtils';
+import { ACTIVITY_TYPE_CONFIG } from '../../utils/cadenceUtils';
 // businessDaysUntil disponível em crmFormat — usado via lógica inline abaixo
 
 interface CompleteActivityModalProps {
   activityId: string;
-  activityType: ActivityType;
+  /**
+   * Canal da atividade. É `string`, e não só os 4 canais de cadência do SDR,
+   * porque a fila do dia (Fase 2) também oferece "Registrar" para tarefas da
+   * régua de agenda (`agenda`, Fase 3) e para reunião e visita.
+   */
+  activityType: string;
   dealId: string;
   contactName: string;
   companyName: string;
   onSuccess: () => void;
   onCancel: () => void;
 }
+
+type ActivityVisual = { icon: string; label: string; color: string; bg: string };
+
+/** Visual das atividades que não são canais de cadência do SDR. */
+const EXTRA_ACTIVITY_VISUAL: Record<string, ActivityVisual> = {
+  agenda:  { icon: 'CalendarCheck', label: 'Follow-up de agenda', color: '#B45309', bg: '#FEF3C7' },
+  meeting: { icon: 'Calendar',      label: 'Reunião',             color: '#7C3AED', bg: '#EDE9FE' },
+  visit:   { icon: 'MapPin',        label: 'Visita',              color: '#3B82F6', bg: '#EFF6FF' },
+};
 
 const RESPONSE_TYPES = [
   { value: 'interested',      label: '✅ Interessado — seguir em frente' },
@@ -43,7 +57,13 @@ export function CompleteActivityModal({
   activityId, activityType, dealId, contactName, companyName, onSuccess, onCancel,
 }: CompleteActivityModalProps) {
   const { user } = useAuthStore();
-  const cfg = ACTIVITY_TYPE_CONFIG[activityType];
+  // `ACTIVITY_TYPE_CONFIG` só conhece os 4 canais de cadência do SDR. Sem este
+  // fallback, `cfg` vinha `undefined` para `agenda`/`meeting`/`visit` e o modal
+  // quebrava AO ABRIR — o SDR clicava "Registrar" numa tarefa da régua de agenda
+  // na fila do dia e a tela caía (PLANO_DESENHO_CRM.md, Fase 3).
+  const cfg = (ACTIVITY_TYPE_CONFIG as Partial<Record<string, ActivityVisual>>)[activityType]
+    ?? EXTRA_ACTIVITY_VISUAL[activityType]
+    ?? { icon: 'StickyNote', label: 'Atividade', color: '#6B7280', bg: 'var(--bg-2)' };
 
   const [outcome,        setOutcome]       = useState('');
   const [responseType,   setResponseType]  = useState<ResponseType | ''>('');

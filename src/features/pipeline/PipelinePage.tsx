@@ -4,6 +4,14 @@
  * Mudanças v3 vs v2:
  *  - 2 funis unificados (WizMart e Smart Café), cada um com 10 estágios
  *  - Tabs de produto no subbar (WizMart / Smart Café) substituem seletor inbound/outbound/hunter
+ *
+ * Fase 1.3 do PLANO_DESENHO_CRM.md — visão única do pipe:
+ *  - As tabs viraram UM board por produto (`pipelineBoards`). Antes, cada funil
+ *    virava uma aba, o que produzia 4 boards do mesmo WizMart (`BDR - Outbound`,
+ *    `Inbound`, `Outbound`, `WizMart`) — o deck pede o contrário: "uma visão
+ *    única do Pipe, sem distinção entre Inbound e Outbound".
+ *  - A origem não sumiu: virou selo no card e filtro no subbar, lendo
+ *    `Deal.origin` (derivado no servidor por `onDealParticipantsChanged`).
  *  - Smart Café: ao soltar em "Conectado ao Representante" → abre ConnectionTypeModal
  *  - Client Pequeno (standard_proposal) → drop para Visita Agendada/Realizada bloqueado
  *  - Ao soltar em estágio com `isHandoffRequired` → abre HandoffModal obrigatório
@@ -24,21 +32,28 @@ import {
   sortedStages,
   shouldTriggerConvergence,
   shouldRequireHandoff,
-  visibleFunnelTypes,
   canMoveDeal,
   canConfirmHandoff,
+  pipelineBoards,
+  dealBelongsToBoard,
+  dealOrigin,
+  filterDealsByOrigin,
+  countByOrigin,
   type HandoffFormData,
 } from '../../utils/funnelUtils';
 import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
 import { HandoffModal } from './HandoffModal';
 import { ConnectionTypeModal, type ConnectionTypeFormData } from './ConnectionTypeModal';
+import { ScheduleMeetingModal } from './ScheduleMeetingModal';
 import { LostReasonModal } from '../deals/LostReasonModal';
 import { getLostReasonLabel, requeuesToBdr } from '../../utils/lostReasonUtils';
 import type { LostReasonId } from '../../types/crm';
 import { matchesProductId } from '../../utils/productScope';
 import { computeParticipantIds, computeResponsibleId } from '../../utils/dealParticipants';
 import { dealParticipantConstraint } from '../../utils/dealQueryScope';
+import { usePermissions } from '../../hooks/usePermissions';
+import { mergePeople } from '../../utils/people';
 import { getLastActivityAt, isCardExpired } from '../../utils/cardExpirationUtils';
 
 // ── Tipos locais ──────────────────────────────────────────────────────────────
@@ -100,6 +115,7 @@ function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageN
   // mas não é mais quem está com o bastão — evita achar que precisa agir nele.
   const isPassedAlong = !!currentUid && currentUid !== deal.responsibleId
     && (deal.participantIds || []).includes(currentUid);
+  const origem = dealOrigin(deal);
 
   return (
     <div
@@ -189,6 +205,23 @@ function KCard({ deal, onOpen, dragging, onDragStart, onDragEnd, sellers, stageN
               Repassado
             </span>
           )}
+          {/* Origem do lead — o que substitui os boards separados de Inbound e
+              Outbound (Fase 1.3). Inbound = o cliente levantou a mão num
+              formulário nosso; Outbound = prospecção ativa do time. */}
+          <span
+            className="badge"
+            title={origem === 'inbound'
+              ? 'Inbound — o cliente preencheu um formulário nosso'
+              : 'Outbound — prospecção ativa do time'}
+            style={{
+              fontSize: 9.5, height: 16, padding: '0 5px', flexShrink: 0,
+              background: origem === 'inbound' ? '#EFF6FF' : '#F0F7F0',
+              color: origem === 'inbound' ? '#1E40AF' : '#1A6B1A',
+              border: `1px solid ${origem === 'inbound' ? '#3B82F644' : '#1A6B1A33'}`,
+            }}
+          >
+            {origem === 'inbound' ? 'In' : 'Out'}
+          </span>
         </div>
         {deal.tasks && <TaskDots tasks={deal.tasks} />}
       </div>
@@ -265,6 +298,8 @@ export function PipelinePage() {
   // Estado local de UI
   const [view,          setView]          = useState<'kanban' | 'list'>('kanban');
   const [selectedFunnel, setSelectedFunnel] = useState<string>('');
+  // Filtro de origem — substitui a antiga separação por funil (Fase 1.3)
+  const [originFilter, setOriginFilter] = useState<'all' | 'inbound' | 'outbound'>('all');
   const [draggedDeal,   setDraggedDeal]   = useState<Deal | null>(null);
   const [activeDrop,    setActiveDrop]    = useState<string | null>(null);
   const [onlyFavorites, setOnlyFavorites] = useState(false);
@@ -289,17 +324,22 @@ export function PipelinePage() {
   // default 'M' se deixado em branco (não força o BDR a pesquisar antes de criar).
   const [ndSize,    setNdSize]   = useState<'' | 'P' | 'M' | 'G'>('');
   const [ndSaving,  setNdSaving] = useState(false);
+  // Fase 3: mover o card para "Reunião Agendada" pede a data, que é a base da
+  // régua de agenda (follow-up 3/3 dias + confirmação 24h úteis antes).
+  const [meetingDrop, setMeetingDrop] = useState<{ deal: Deal; targetStage: FunnelStage } | null>(null);
 
   // Papéis com leitura restrita a participantes (bate com canSeeAllDeals nas
   // rules) — só eles precisam do toggle "Meus Cards / Cards de Outro Ator".
   const showDealScopeToggle = !['master', 'manager', 'viewer', 'design'].includes(role);
+  // Quem tem `manage_deal_cards` (BDR por padrão) lê todos os cards: sem filtro de participante.
+  const canManageDeals = usePermissions().hasPermission('manage_deal_cards');
 
   const dealScopeTargetUid = dealScopeSelection === 'all' ? '' : dealScopeSelection === 'mine' ? (user?.uid || '') : dealScopeSelection;
   const dealScopeConstraints = useMemo(() => {
-    const base = dealParticipantConstraint(user);
+    const base = dealParticipantConstraint(user, canManageDeals);
     if (!showDealScopeToggle || !dealScopeTargetUid) return base;
     return [...base, where('responsibleId', '==', dealScopeTargetUid)];
-  }, [user, showDealScopeToggle, dealScopeTargetUid]);
+  }, [user, canManageDeals, showDealScopeToggle, dealScopeTargetUid]);
   // Firestore constraints são recriados a cada render — o hook só reassina
   // quando `queryConstraints.length` muda, então o alvo (all → sem filtro,
   // mine → uid X, colega → uid Y) precisa dessa chave separada pra forçar a
@@ -314,10 +354,12 @@ export function PipelinePage() {
   // lista encolheria pra só quem já está selecionado no filtro atual.
   const { data: baseScopedDeals } = useFirestoreCollection<Deal>(
     'deals',
-    showDealScopeToggle ? dealParticipantConstraint(user) : [],
+    showDealScopeToggle ? dealParticipantConstraint(user, canManageDeals) : [],
   );
-  const { data: sellers }  = useFirestoreCollection<Seller>('sellers');
+  const { data: legacySellers } = useFirestoreCollection<Seller>('sellers');
   const { data: allUsers } = useFirestoreCollection<SettingUser>('users');
+  // Nomes/avatares: `users` primeiro (todo convidado só existe lá), `sellers` legado como reserva.
+  const sellers = useMemo(() => mergePeople(allUsers, legacySellers), [allUsers, legacySellers]);
   const { data: activities } = useFirestoreCollection<any>('activities');
   const { updateDocument, addDocument } = useFirestoreMutations('deals');
   const { addDocument: addActivity } = useFirestoreMutations('activities');
@@ -337,13 +379,11 @@ export function PipelinePage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [baseScopedDeals, allUsers, user, showDealScopeToggle]);
 
-  // Filtrar funis pelo role e produto
-  const allowedTypes = visibleFunnelTypes(role);
+  // Um board por produto — o funil unificado ('main') absorve os legados do
+  // mesmo produto (Fase 1.3). Sem funil unificado, cai nos legados.
   const visibleFunnels = useMemo(
-    () => funnels
-      .filter(f => f.isActive && allowedTypes.includes(f.type))
-      .filter(f => matchesProductId(productScope, f.productId)),
-    [funnels, allowedTypes, productScope],
+    () => pipelineBoards(funnels, role, pid => matchesProductId(productScope, pid)),
+    [funnels, role, productScope],
   );
 
   // Seleciona o primeiro funil disponível ao carregar
@@ -358,15 +398,24 @@ export function PipelinePage() {
   const activeFunnel = visibleFunnels.find(f => f.id === selectedFunnel);
   const stages = activeFunnel ? sortedStages(activeFunnel) : [];
 
-  // Filtra deals pelo funil ativo, produto e favoritos
-  const funnelDeals = useMemo(
+  // Deals do board ativo. `dealBelongsToBoard` é o que traz para o board único
+  // os cards ainda presos em funis legados — sem precisar migrar o documento.
+  const boardDeals = useMemo(
     () => deals.filter(d => {
-      if (activeFunnel && d.funnelId && d.funnelId !== activeFunnel.id) return false;
+      if (!dealBelongsToBoard(d, activeFunnel)) return false;
       if (!matchesProductId(productScope, d.productId || 'wizmart')) return false;
       if (onlyFavorites && !d.isFavorite) return false;
       return true;
     }),
     [deals, activeFunnel, productScope, onlyFavorites],
+  );
+
+  // Quebra por origem do board inteiro — alimenta os contadores do filtro.
+  const originCounts = useMemo(() => countByOrigin(boardDeals), [boardDeals]);
+
+  const funnelDeals = useMemo(
+    () => filterDealsByOrigin(boardDeals, originFilter),
+    [boardDeals, originFilter],
   );
 
   const toggleFavorite = async (deal: Deal) => {
@@ -409,6 +458,16 @@ export function PipelinePage() {
     // ── v3: Smart Café "Conectado ao Representante" requer seleção de subtipo ──
     if (stage.hasConnectionSubtype && activeFunnel.productId === 'smart_cafe' && !draggedDeal.connectionType) {
       setConnectionDrop({ deal: draggedDeal, targetStage: stage });
+      setDraggedDeal(null);
+      setActiveDrop(null);
+      return;
+    }
+
+    // ── Fase 3: "Reunião Agendada" exige a data do compromisso ──────────────
+    // Sem data a Cloud Function não tem como montar a régua de agenda, então o
+    // card não entra na etapa "no escuro".
+    if (stage.id === 'reuniao_agendada' && !draggedDeal.meetingScheduledAt) {
+      setMeetingDrop({ deal: draggedDeal, targetStage: stage });
       setDraggedDeal(null);
       setActiveDrop(null);
       return;
@@ -630,8 +689,9 @@ export function PipelinePage() {
 
       if (role === 'bdr' && user?.uid) {
         // A atividade do BDR vai primeiro para o SDR (Observações do cliente,
-        // jul/2026): o lead entra na fila de distribuição do motor de cadência
-        // (status 'in_queue') e o dailyCadenceEngine o atribui a um SDR às 7h.
+        // jul/2026): o lead entra na fila do BDR (status 'in_queue') e fica lá
+        // até o BDR (ou a gestão) atribuí-lo manualmente a um SDR — não há
+        // distribuição automática.
         dealData.bdrId = user.uid;
         dealData.status = 'in_queue';
         // Porte estimado (Fase D3) — opcional; sem seleção, fica sem o campo
@@ -648,7 +708,7 @@ export function PipelinePage() {
       await addDocument(dealData);
       setShowNewDeal(false);
       if (role === 'bdr') {
-        triggerToast({ pts: 0, label: 'Lead na fila', custom: '📥 Lead criado — será distribuído a um SDR na próxima cadência (7h).' });
+        triggerToast({ pts: 0, label: 'Lead na fila', custom: '📥 Lead criado — atribua a um SDR para iniciar a cadência.' });
       }
     } catch (err) {
       console.error('[PipelinePage] Erro ao criar deal:', err);
@@ -699,9 +759,9 @@ export function PipelinePage() {
               const icon = f.productId === 'smart_cafe' ? 'Coffee' : 'ShoppingBag';
               const productLabel = f.productId === 'smart_cafe' ? 'Smart Café' : 'WizMart';
               const funnelLabel = f.name?.trim() || productLabel;
-              const dealCount = deals.filter(d =>
-                d.funnelId ? d.funnelId === f.id : d.productId === f.productId,
-              ).length;
+              // Mesmo critério do board ativo — senão a aba mostra um número e
+              // o Kanban outro (o board unificado absorve os funis legados).
+              const dealCount = deals.filter(d => dealBelongsToBoard(d, f)).length;
               return (
                 <button
                   key={f.id}
@@ -730,6 +790,29 @@ export function PipelinePage() {
 
         {/* Controles — fixos à direita */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {/* Origem (Fase 1.3): o pipe é único e a origem é um filtro, não um
+              board separado. Os contadores mostram a quebra do board inteiro,
+              não da seleção atual — é o que o slide 2 pede. */}
+          <div className="seg" title="Origem do lead — Inbound veio de formulário nosso, Outbound é prospecção do time">
+            <button
+              className={originFilter === 'all' ? 'on' : ''}
+              onClick={() => setOriginFilter('all')}
+            >
+              Todas {originCounts.total > 0 && `(${originCounts.total})`}
+            </button>
+            <button
+              className={originFilter === 'inbound' ? 'on' : ''}
+              onClick={() => setOriginFilter('inbound')}
+            >
+              Inbound {originCounts.inbound > 0 && `(${originCounts.inbound})`}
+            </button>
+            <button
+              className={originFilter === 'outbound' ? 'on' : ''}
+              onClick={() => setOriginFilter('outbound')}
+            >
+              Outbound {originCounts.outbound > 0 && `(${originCounts.outbound})`}
+            </button>
+          </div>
           {showDealScopeToggle && (
             <select
               className="input"
@@ -770,13 +853,24 @@ export function PipelinePage() {
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <div className="card card-pad" style={{ textAlign: 'center', maxWidth: 440 }}>
               <Icon name="ShoppingCart" size={40} color="var(--accent)" style={{ margin: '0 auto 14px' }} />
-              <div className="h2" style={{ marginBottom: 6 }}>Nenhum negócio neste funil</div>
+              <div className="h2" style={{ marginBottom: 6 }}>
+                {originFilter !== 'all'
+                  ? `Nenhum negócio ${originFilter === 'inbound' ? 'Inbound' : 'Outbound'} neste pipe`
+                  : 'Nenhum negócio neste funil'}
+              </div>
               <p className="muted" style={{ fontSize: 14, marginBottom: 16 }}>
-                {activeFunnel?.type === 'hunter'
-                  ? 'Deals aparecem aqui quando um SDR faz handoff via Inbound ou Outbound.'
-                  : 'Crie o primeiro negócio para começar a movimentar o pipeline.'}
+                {originFilter !== 'all'
+                  ? `O pipe tem ${originCounts.total} negócio(s), mas nenhum desta origem. Volte para "Todas" para ver todos.`
+                  : activeFunnel?.type === 'hunter'
+                    ? 'Deals aparecem aqui quando um SDR faz handoff via Inbound ou Outbound.'
+                    : 'Crie o primeiro negócio para começar a movimentar o pipeline.'}
               </p>
-              {canMoveDeal(role) && activeFunnel?.type !== 'hunter' && (
+              {originFilter !== 'all' && (
+                <button className="btn btn-outline" style={{ margin: '0 auto 10px' }} onClick={() => setOriginFilter('all')}>
+                  <Icon name="X" size={15} />Limpar filtro de origem
+                </button>
+              )}
+              {originFilter === 'all' && canMoveDeal(role) && activeFunnel?.type !== 'hunter' && (
                 <button className="btn btn-primary" style={{ margin: '0 auto' }} onClick={() => openNewDeal()}>
                   <Icon name="Plus" size={16} />Criar primeiro negócio
                 </button>
@@ -849,6 +943,27 @@ export function PipelinePage() {
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px' }}>
           <DealsTable deals={funnelDeals} onOpen={deal => navigate(`/lead/${deal.id}`)} sellers={sellers} stages={stages} />
         </div>
+      )}
+
+      {/* Fase 3 — data da reunião antes de entrar na etapa */}
+      {meetingDrop && (
+        <ScheduleMeetingModal
+          deal={meetingDrop.deal}
+          onCancel={() => setMeetingDrop(null)}
+          onConfirm={async (quando) => {
+            const { deal, targetStage } = meetingDrop;
+            setMeetingDrop(null);
+            try {
+              // A data vai junto com o move: a CF onDealStageChanged lê o deal
+              // já atualizado e monta a régua na mesma transição.
+              await updateDocument(deal.id, { meetingScheduledAt: quando, updatedAt: new Date() });
+              commitDrop({ ...deal, meetingScheduledAt: quando }, targetStage);
+            } catch (err) {
+              console.error('[PipelinePage] Erro ao agendar a reunião:', err);
+              triggerToast({ pts: 0, label: 'Erro', custom: '⚠️ Não foi possível agendar a reunião.' });
+            }
+          }}
+        />
       )}
 
       {/* Alerta de Convergência (sem handoff) */}

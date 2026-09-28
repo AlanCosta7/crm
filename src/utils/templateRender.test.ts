@@ -67,6 +67,46 @@ describe('renderTemplate — substituição de placeholders', () => {
   });
 });
 
+// Achado de QA manual (13/09/2026): os 3 templates semeados em
+// `scripts/seed/seed-emulators.mjs` usavam nomes de variável em inglês
+// ({{companyName}}, {{contactFirstName}}, {{userName}}, {{visitDate}}...) que
+// nunca bateram com o `ctx` real que `EmailActionModal.tsx`/
+// `WhatsAppActionModal.tsx` constroem — toda mensagem enviada saía com as
+// tags {{...}} literais, sem substituir nada. Este teste trava as versões
+// corrigidas (mesmo texto do seed) contra o `ctx` de verdade que o app monta,
+// garantindo que nenhuma tag sobra sem substituição.
+describe('renderTemplate — templates reais do seed (regressão do bug de nomes)', () => {
+  const ctxReal: TemplateContext = {
+    contato: 'Carlos Mendes',
+    empresa: 'WizDistribuidora SP',
+    vendedor: 'João SDR',
+    negocio: 'Contrato Anual — WizDistribuidora',
+    valor: '156.000',
+    produto: 'WizMart',
+  };
+
+  it('tpl-001 (Primeiro Email — WizMart) renderiza sem sobrar nenhuma tag', () => {
+    const subject = 'Olá {{contato}}, conheça o WizMart!';
+    const body = 'Olá {{contato}},\n\nA {{empresa}} pode transformar seu espaço em um minimarket de alto giro. Posso mostrar como em 20 minutos?\n\n{{vendedor}}';
+    expect(renderTemplate(subject, ctxReal)).not.toMatch(/\{\{/);
+    expect(renderTemplate(body, ctxReal)).not.toMatch(/\{\{/);
+    expect(renderTemplate(body, ctxReal)).toContain('Carlos Mendes');
+    expect(renderTemplate(body, ctxReal)).toContain('WizDistribuidora SP');
+  });
+
+  it('tpl-002 (Confirmação de Visita — Rep) renderiza sem sobrar nenhuma tag', () => {
+    const body = 'Olá {{contato}}! 👋\nConfirmando nossa visita na {{empresa}}.\nQualquer dúvida estou à disposição! 🤝';
+    expect(renderTemplate(body, ctxReal)).not.toMatch(/\{\{/);
+  });
+
+  it('tpl-003 (Proposta Smart Café) renderiza sem sobrar nenhuma tag', () => {
+    const subject = 'Proposta Especial Smart Café — {{empresa}}';
+    const body = 'Prezado(a) {{contato}},\n\nSegue a proposta de comodato Smart Café personalizada para o seu negócio.\n\n{{vendedor}}';
+    expect(renderTemplate(subject, ctxReal)).not.toMatch(/\{\{/);
+    expect(renderTemplate(body, ctxReal)).not.toMatch(/\{\{/);
+  });
+});
+
 describe('extractVariables — extração de chaves de template', () => {
   it('deve retornar array vazio se não houver placeholders', () => {
     expect(extractVariables('Olá Alan, como vai?')).toEqual([]);

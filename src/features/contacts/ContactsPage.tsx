@@ -13,6 +13,7 @@ import { useUIStore } from '../../stores/uiStore';
 import { useAuthStore } from '../../stores/authStore';
 import { matchesProductId, matchesProductIds, productIdsForNewEntity } from '../../utils/productScope';
 import { dealParticipantConstraint } from '../../utils/dealQueryScope';
+import { usePermissions } from '../../hooks/usePermissions';
 
 export function ContactsPage() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -25,7 +26,8 @@ export function ContactsPage() {
   
   // Triggers do Firestore enlaçados com listeners em tempo real (Fase 2)
   const { data: contacts, loading } = useFirestoreCollection<Contact>('contacts');
-  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
+  const canManageDeals = usePermissions().hasPermission('manage_deal_cards');
+  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user, canManageDeals));
   const { data: stages } = useFirestoreCollection<Stage>('stages');
   const { data: sellers } = useFirestoreCollection<Seller>('sellers');
   const { addDocument, updateDocument } = useFirestoreMutations('contacts');

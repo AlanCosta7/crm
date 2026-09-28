@@ -8,16 +8,19 @@
 
 import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, serverTimestamp, where, collection, getDocs, writeBatch, query } from 'firebase/firestore';
 import { db, functions } from '../../config/firebase';
 import { useAuthStore } from '../../stores/authStore';
 import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
-import type { SettingUser, Stage, Funnel, FunnelStage, FunnelType, UserRole, ProductId, CommissionTier } from '../../types/crm';
+import type { SettingUser, Stage, Funnel, FunnelStage, FunnelType, UserRole, ProductId, CommissionTier, Deal } from '../../types/crm';
 import { Icon } from '../../components/ui/Icon';
 import { Av } from '../../components/ui/Av';
 import { sortedStages } from '../../utils/funnelUtils';
 import { CalendarPane } from './CalendarPane';
 import { LeadSourcesPane } from './LeadSourcesPane';
+import { AuditoriaPane } from './AuditoriaPane';
+import { dealsToReassign } from './reassignCarteira';
+import { PERMISSIONS_REV, defaultPermissions, effectivePermissions } from '../../utils/rolePermissions';
 
 // ── PipelinesPane ─────────────────────────────────────────────────────────────
 function PipelinesPane() {
@@ -395,7 +398,7 @@ const getRoleBadgeClass = (roleId: string) => {
 };
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'empresa' | 'usuarios' | 'perfis' | 'pipelines' | 'calendar' | 'captacao' | 'integracoes'>('usuarios');
+  const [tab, setTab] = useState<'empresa' | 'usuarios' | 'perfis' | 'pipelines' | 'calendar' | 'captacao' | 'integracoes' | 'auditoria'>('usuarios');
 
   // Firestore sync bindings
   const { data: users, loading: loadingUsers } = useFirestoreCollection<SettingUser>('users');
@@ -451,44 +454,28 @@ export function SettingsPage() {
   const { addDocument, updateDocument } = useFirestoreMutations('settings');
   const { updateDocument: updateUser, deleteDocument: deleteUser } = useFirestoreMutations('users');
 
-  // Perfis padrão do sistema
+  // Perfis padrão do sistema (nomes aqui; permissões em utils/rolePermissions.ts)
   const DEFAULT_ROLES = [
-    { id: 'master', name: 'Admin Master', permissions: [
-      'view_dashboard', 'view_pipeline', 'view_contacts', 'view_companies', 'view_cadence',
-      'view_activities', 'view_handoffs', 'view_tasks', 'view_leaderboard', 'view_carteira',
-      'view_loja', 'view_kpi_reports', 'view_admin_settings', 'view_management_dashboard'
-    ] },
-    { id: 'manager', name: 'Gestor', permissions: [
-      'view_dashboard', 'view_pipeline', 'view_contacts', 'view_companies', 'view_activities',
-      'view_tasks', 'view_leaderboard', 'view_carteira', 'view_loja', 'view_kpi_reports',
-      'view_management_dashboard'
-    ] },
-    { id: 'sdr', name: 'SDR', permissions: [
-      'view_dashboard', 'view_pipeline', 'view_contacts', 'view_cadence', 'view_activities',
-      'view_leaderboard', 'view_carteira', 'view_loja', 'view_sdr_dashboard'
-    ] },
-    { id: 'rep', name: 'Representante', permissions: [
-      'view_dashboard', 'view_pipeline', 'view_contacts', 'view_handoffs', 'view_leaderboard',
-      'view_carteira', 'view_loja', 'view_rep_dashboard'
-    ] },
-    { id: 'bdr', name: 'BDR', permissions: [
-      'view_dashboard', 'view_pipeline', 'view_contacts', 'view_leaderboard', 'view_carteira',
-      'view_loja', 'view_bdr_dashboard'
-    ] },
-    { id: 'viewer', name: 'Visualizador', permissions: [
-      'view_dashboard', 'view_pipeline', 'view_contacts', 'view_companies', 'view_kpi_reports',
-      'view_viewer_dashboard'
-    ] },
-  ];
+    { id: 'master', name: 'Admin Master' },
+    { id: 'manager', name: 'Gestor' },
+    { id: 'sdr', name: 'SDR' },
+    { id: 'rep', name: 'Representante' },
+    { id: 'bdr', name: 'BDR' },
+    { id: 'viewer', name: 'Visualizador' },
+    { id: 'design', name: 'Design' },
+    { id: 'financeiro', name: 'Financeiro' },
+  ].map(r => ({ ...r, permissions: defaultPermissions(r.id) }));
 
-  // Mescla perfis padrão com dados do banco
-  const mergedRoles = [...DEFAULT_ROLES];
+  // Mescla perfis padrão com dados do banco. Perfil salvo numa versão anterior
+  // das permissões recebe as novas (effectivePermissions) em vez de congelar.
+  const mergedRoles: { id: string; name: string; permissions: string[] }[] = [...DEFAULT_ROLES];
   dbRoles.forEach(r => {
+    const merged = { ...r, permissions: effectivePermissions(r.id, r) };
     const idx = mergedRoles.findIndex(x => x.id === r.id);
     if (idx !== -1) {
-      mergedRoles[idx] = { ...mergedRoles[idx], ...r };
+      mergedRoles[idx] = { ...mergedRoles[idx], ...merged };
     } else {
-      mergedRoles.push(r);
+      mergedRoles.push(merged);
     }
   });
 
@@ -513,6 +500,21 @@ export function SettingsPage() {
   const [editProducts, setEditProducts] = useState<ProductId[]>([]);
   const [editTier, setEditTier] = useState<CommissionTier>('junior');
   const [editIsActive, setEditIsActive] = useState(true);
+
+  // O master editando a própria conta: bloquear a si mesmo deixaria o tenant sem
+  // administrador logado (a CF onUserProfileWritten também barra o último master
+  // no servidor, mas evitar o clique é melhor que desfazê-lo depois).
+  const isSelf = !!selectedUser?.id && selectedUser.id === user?.uid;
+
+  // Fase 6.1 — encerrar sessão sem bloquear a conta (PLANO_DESENHO_CRM.md)
+  const [endSessionBusy, setEndSessionBusy] = useState(false);
+  const [endSessionMsg, setEndSessionMsg] = useState<'ok' | 'error' | ''>('');
+
+  // Fase 6.2 — reatribuir carteira de um sdr/rep antes de bloqueá-lo
+  const [carteiraDeals, setCarteiraDeals] = useState<Pick<Deal, 'id' | 'status' | 'assignedSdrId' | 'assignedRepId'>[] | null>(null);
+  const [reassignTargetUid, setReassignTargetUid] = useState('');
+  const [reassignBusy, setReassignBusy] = useState(false);
+  const [reassignMsg, setReassignMsg] = useState<'ok' | 'error' | ''>('');
 
   // Estados locais para Perfis (Roles)
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -543,6 +545,9 @@ export function SettingsPage() {
       { id: 'view_rep_dashboard', label: 'Painel de Representante (Rep)', desc: 'Visualiza handoffs aceitos e vencimentos' },
       { id: 'view_bdr_dashboard', label: 'Painel de BDR', desc: 'Visualiza leads gerados e status da fila' },
       { id: 'view_viewer_dashboard', label: 'Painel de Visualizador (Viewer)', desc: 'Visualiza dados consolidados apenas para leitura' },
+    ]},
+    { category: 'Ações em Cards', items: [
+      { id: 'manage_deal_cards', label: 'Movimentar cards e trocar responsável', desc: 'Vê e move de estágio qualquer card do time e pode trocar o responsável (BDR, SDR ou Rep). Vale para perfis operacionais; Gestor e Master já veem todos os cards por natureza do papel' },
     ]}
   ];
 
@@ -571,13 +576,14 @@ export function SettingsPage() {
       id: docId,
       name: roleNameInput.trim(),
       permissions: rolePermsSelected,
+      permissionsRev: PERMISSIONS_REV,
     });
     
     setShowRoleModal(false);
   };
 
   const handleDeleteRoleClick = async (roleId: string) => {
-    if (['master', 'manager', 'sdr', 'rep', 'bdr', 'viewer'].includes(roleId)) {
+    if (['master', 'manager', 'sdr', 'rep', 'bdr', 'viewer', 'design', 'financeiro'].includes(roleId)) {
       alert('Não é possível excluir um perfil padrão do sistema.');
       return;
     }
@@ -600,6 +606,65 @@ export function SettingsPage() {
     setEditProducts(u.productIds || []);
     setEditTier(u.commissionTier || 'junior');
     setEditIsActive(u.isActive !== false);
+    setEndSessionMsg('');
+    setReassignMsg('');
+    setReassignTargetUid('');
+    setCarteiraDeals(null);
+
+    // Carrega a carteira aberta do usuário só quando fizer sentido (sdr/rep) —
+    // uma leitura pontual (getDocs), não uma assinatura viva: a tela some ao
+    // fechar o modal e ninguém precisa de tempo real aqui.
+    const field = u.role === 'sdr' ? 'assignedSdrId' : u.role === 'rep' ? 'assignedRepId' : null;
+    if (field && u.id && user?.tenantId) {
+      getDocs(query(collection(db, 'tenants', user.tenantId, 'deals'), where(field, '==', u.id), where('status', '==', 'open')))
+        .then((snap) => setCarteiraDeals(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Pick<Deal, 'id' | 'status' | 'assignedSdrId' | 'assignedRepId'>))))
+        .catch((err) => {
+          console.error('[SettingsPage] Erro ao carregar carteira do usuário:', err);
+          setCarteiraDeals([]);
+        });
+    }
+  };
+
+  const handleEndSession = async () => {
+    if (!selectedUser?.id || isSelf) return;
+    setEndSessionBusy(true);
+    setEndSessionMsg('');
+    try {
+      await httpsCallable(functions, 'endUserSession')({ targetUid: selectedUser.id });
+      setEndSessionMsg('ok');
+    } catch (err) {
+      console.error('[endUserSession] erro:', err);
+      setEndSessionMsg('error');
+    } finally {
+      setEndSessionBusy(false);
+    }
+  };
+
+  const handleReassignCarteira = async () => {
+    if (!selectedUser?.id || !reassignTargetUid || !carteiraDeals || !user?.tenantId) return;
+    const writes = dealsToReassign(carteiraDeals, selectedUser.id, selectedUser.role);
+    if (writes.length === 0) return;
+
+    setReassignBusy(true);
+    setReassignMsg('');
+    try {
+      const batch = writeBatch(db);
+      for (const w of writes) {
+        batch.update(doc(db, 'tenants', user.tenantId, 'deals', w.dealId), {
+          [w.field]: reassignTargetUid,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+      setReassignMsg('ok');
+      setCarteiraDeals([]);
+      setReassignTargetUid('');
+    } catch (err) {
+      console.error('[reassignCarteira] erro:', err);
+      setReassignMsg('error');
+    } finally {
+      setReassignBusy(false);
+    }
   };
 
   const handleInviteSubmit = async (e: React.FormEvent) => {
@@ -965,7 +1030,7 @@ export function SettingsPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
         {mergedRoles.map(r => {
-          const isDefault = ['master', 'manager', 'sdr', 'rep', 'bdr', 'viewer'].includes(r.id);
+          const isDefault = ['master', 'manager', 'sdr', 'rep', 'bdr', 'viewer', 'design', 'financeiro'].includes(r.id);
           const activeCount = (r.permissions || []).length;
           
           return (
@@ -1027,6 +1092,7 @@ export function SettingsPage() {
     calendar:    renderCalendar,
     captacao:    () => <LeadSourcesPane />,
     integracoes: renderIntegracoes,
+    auditoria:   () => <AuditoriaPane />,
   };
 
   return (
@@ -1036,7 +1102,7 @@ export function SettingsPage() {
       <div style={{ background: 'var(--primary-light)', borderLeft: '4px solid var(--primary)', borderRadius: '0 8px 8px 0', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
         <Icon name="ShieldAlert" size={18} color="var(--primary)" />
         <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--primary-hover)' }}>
-          Acesso restrito — Preferências Administrativas do Master
+          Acesso restrito — Preferências Administrativas da Gestão
         </span>
       </div>
 
@@ -1052,6 +1118,7 @@ export function SettingsPage() {
           ['calendar',    '📅 Google Calendar'],
           ['captacao',    '📥 Captação de Leads'],
           ['integracoes', 'Integrações'],
+          ['auditoria',   '🔒 Auditoria de Sessão'],
         ].map(([k, l]) => (
           <button
             key={k}
@@ -1221,17 +1288,87 @@ export function SettingsPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 13.5 }}>Status da Conta</div>
-                      <div className="muted" style={{ fontSize: 11.5 }}>Bloquear impede o acesso do vendedor ao sistema</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {isSelf
+                          ? 'Você não pode bloquear a sua própria conta'
+                          : 'Bloquear encerra a sessão e impede novo login. O histórico e a carteira do usuário são preservados.'}
+                      </div>
                     </div>
                     <button
                       type="button"
                       className={`btn btn-sm ${editIsActive ? 'btn-outline' : 'btn-danger'}`}
+                      disabled={isSelf}
+                      title={isSelf ? 'Bloquear a própria conta deixaria você fora do sistema' : undefined}
                       onClick={() => setEditIsActive(!editIsActive)}
                     >
                       {editIsActive ? 'Bloquear Acesso' : 'Desbloquear Acesso'}
                     </button>
                   </div>
                   
+                  {/* Fase 6.1 — encerrar sessão sem bloquear a conta */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>Encerrar Sessão Atual</div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {isSelf
+                          ? 'Você não pode encerrar a própria sessão por aqui'
+                          : 'Derruba o login ativo agora (ex.: notebook esquecido logado). A conta continua liberada — o usuário pode logar de novo em seguida.'}
+                      </div>
+                      {endSessionMsg === 'ok' && <div style={{ fontSize: 11.5, color: 'var(--primary)', fontWeight: 600, marginTop: 4 }}>Sessão encerrada.</div>}
+                      {endSessionMsg === 'error' && <div style={{ fontSize: 11.5, color: '#B91C1C', fontWeight: 600, marginTop: 4 }}>Não foi possível encerrar a sessão.</div>}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      disabled={isSelf || endSessionBusy}
+                      title={isSelf ? 'Encerrar a própria sessão deixaria você fora do sistema' : undefined}
+                      onClick={handleEndSession}
+                    >
+                      {endSessionBusy ? 'Encerrando…' : 'Encerrar Sessão'}
+                    </button>
+                  </div>
+
+                  {/* Fase 6.2 — reatribuir carteira aberta de sdr/rep */}
+                  {(editRole === 'sdr' || editRole === 'rep') && (
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5 }}>Reatribuir Carteira</div>
+                      <div className="muted" style={{ fontSize: 11.5, marginBottom: 8 }}>
+                        {carteiraDeals === null
+                          ? 'Carregando negócios em aberto…'
+                          : carteiraDeals.length === 0
+                          ? 'Nenhum negócio em aberto na carteira deste usuário.'
+                          : `${carteiraDeals.length} negócio(s) em aberto atribuído(s) a este usuário.`}
+                      </div>
+                      {carteiraDeals !== null && carteiraDeals.length > 0 && (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <select
+                            className="input"
+                            style={{ flex: 1 }}
+                            value={reassignTargetUid}
+                            onChange={(e) => setReassignTargetUid(e.target.value)}
+                          >
+                            <option value="">Selecione o novo responsável…</option>
+                            {users
+                              .filter((u) => u.id !== selectedUser?.id && u.role === editRole && u.isActive !== false)
+                              .map((u) => (
+                                <option key={u.id} value={u.id}>{u.name}</option>
+                              ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            disabled={!reassignTargetUid || reassignBusy}
+                            onClick={handleReassignCarteira}
+                          >
+                            {reassignBusy ? 'Reatribuindo…' : 'Reatribuir'}
+                          </button>
+                        </div>
+                      )}
+                      {reassignMsg === 'ok' && <div style={{ fontSize: 11.5, color: 'var(--primary)', fontWeight: 600, marginTop: 4 }}>Carteira reatribuída.</div>}
+                      {reassignMsg === 'error' && <div style={{ fontSize: 11.5, color: '#B91C1C', fontWeight: 600, marginTop: 4 }}>Não foi possível reatribuir a carteira.</div>}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--danger)' }}>Excluir Usuário</div>

@@ -1,13 +1,12 @@
 /**
  * cadenceUtils.test.ts — Testes do Motor de Cadência SDR
  *
- * Cobre: fórmula de distribuição de cards, taxa de conclusão,
+ * Cobre: taxa de conclusão,
  * cálculo de data BRT e configuração de tipos de atividade.
  */
 
 import { describe, it, expect } from 'vitest';
 import {
-  calcNewCards,
   calcCompletionRate,
   getTodayBRT,
   daysBetweenBRT,
@@ -21,37 +20,6 @@ import {
   dayOffsetLabel,
   type CadenceCard,
 } from './cadenceUtils';
-
-// ── calcNewCards ──────────────────────────────────────────────────────────────
-describe('calcNewCards — fórmula de distribuição SDR', () => {
-  it('1º dia (null) → 3 cards', () => {
-    expect(calcNewCards(null)).toBe(3);
-  });
-  it('taxa 1.0 → 3 cards (máximo)', () => {
-    expect(calcNewCards(1.0)).toBe(3);
-  });
-  it('taxa 0.75 → 2 cards', () => {
-    expect(calcNewCards(0.75)).toBe(2);
-  });
-  it('taxa 0.67 → 2 cards (floor de 2.01)', () => {
-    expect(calcNewCards(0.67)).toBe(2);
-  });
-  it('taxa 0.50 → 1 card', () => {
-    expect(calcNewCards(0.50)).toBe(1);
-  });
-  it('taxa 0.33 → 0 cards (floor de 0.99)', () => {
-    expect(calcNewCards(0.33)).toBe(0);
-  });
-  it('taxa 0.00 → 0 cards (SDR bloqueado)', () => {
-    expect(calcNewCards(0.00)).toBe(0);
-  });
-  it('taxa > 1 não ultrapassa 3', () => {
-    expect(calcNewCards(2.0)).toBe(3);
-  });
-  it('taxa negativa resulta em 0', () => {
-    expect(calcNewCards(-0.5)).toBe(0);
-  });
-});
 
 // ── calcCompletionRate ────────────────────────────────────────────────────────
 describe('calcCompletionRate', () => {
@@ -153,29 +121,6 @@ describe('ACTIVITY_TYPE_CONFIG', () => {
   });
   it('LinkedIn tem cor azul (#0077B5)', () => {
     expect(ACTIVITY_TYPE_CONFIG.linkedin.color).toBe('#0077B5');
-  });
-});
-
-// ── Cenários completos de distribuição diária ─────────────────────────────────
-describe('Cenários de distribuição diária', () => {
-  it('SDR completa todos os cards → recebe 3 amanhã', () => {
-    const rate = calcCompletionRate(12, 12); // 3 cards × 4 atividades
-    expect(calcNewCards(rate)).toBe(3);
-  });
-
-  it('SDR completa 75% → recebe 2 amanhã', () => {
-    const rate = calcCompletionRate(9, 12);
-    expect(calcNewCards(rate)).toBe(2);
-  });
-
-  it('SDR completa metade → recebe 1 amanhã', () => {
-    const rate = calcCompletionRate(6, 12);
-    expect(calcNewCards(rate)).toBe(1);
-  });
-
-  it('SDR não completa nada → bloqueado (0 cards)', () => {
-    const rate = calcCompletionRate(0, 12);
-    expect(calcNewCards(rate)).toBe(0);
   });
 });
 

@@ -10,7 +10,6 @@
  *  - Renderização de cards com atividades
  *  - Exibição de taxa de conclusão
  *  - Abertura do CompleteActivityModal ao clicar em atividade
- *  - Previsão de cards amanhã (fórmula)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -205,19 +204,10 @@ describe('CadenciaPage — métricas de progresso', () => {
     expect(screen.getByText('15')).toBeInTheDocument(); // coinBalance do user mockado
   });
 
-  it('previsão de 3 cards amanhã quando 100% hoje', () => {
-    const fullQueue = makeQueue({ activitiesCompleted: 8, activitiesRequired: 8 });
-    mockUseCadencia.mockReturnValue(makeReadyState(fullQueue, 100));
+  it('não exibe mais previsão de novos cards (a atribuição de leads é manual)', () => {
+    mockUseCadencia.mockReturnValue(makeReadyState());
     render(<CadenciaPage />);
-    expect(screen.getByText('Previsão Amanhã')).toBeInTheDocument();
-  });
-
-  it('aviso de bloqueio quando previsão = 0 cards', () => {
-    // Taxa 0% → 0 cards amanhã
-    const zeroQueue = makeQueue({ activitiesCompleted: 0, activitiesRequired: 8 });
-    mockUseCadencia.mockReturnValue(makeReadyState(zeroQueue, 0));
-    render(<CadenciaPage />);
-    expect(screen.getByText(/complete mais hoje/i)).toBeInTheDocument();
+    expect(screen.queryByText('Previsão Amanhã')).not.toBeInTheDocument();
   });
 });
 

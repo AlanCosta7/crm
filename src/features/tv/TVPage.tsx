@@ -4,6 +4,7 @@ import { ref, onValue, off } from 'firebase/database';
 import { rtdb } from '../../config/firebase';
 import { Icon } from '../../components/ui/Icon';
 import { Av } from '../../components/ui/Av';
+import { SdrRankingPanel } from './SdrRankingPanel';
 
 // Arco de progresso circular SVG para exibição de tarefas
 function Arc({ pct, size = 150, strokeColor = '#8DB600' }: { pct: number; size?: number; strokeColor?: string }) {
@@ -138,7 +139,17 @@ export function TVPage() {
   const kpis = tvData?.live_kpis || { monthRevenue: 0, monthGoal: 1, todayDeals: 0, todayRevenue: 0 };
   const sellersList = tvData?.sellers || [];
   const tasksObj = tvData?.tasks || { done: 0, total: 1 };
+  // Agenda do mês com quebra por origem (slides 2 e 10). Vem `null` quando o
+  // canal não tem a métrica `agenda_origem` — o tvHelper nem envia o dado.
+  const agenda = tvData?.agenda ?? null;
+  const showAgenda = allowed.includes('agenda_origem') && agenda !== null;
   const rankingRaw = tvData?.leaderboard || [];
+  // Ranking de SDRs (Fase B do PLANO_DESENHO_CRM_2). `null` sem a métrica
+  // `ranking_sdr` — o tvHelper nem envia o dado nesse caso.
+  const sdrRanking = tvData?.ranking_sdr ?? null;
+  const showSdrRanking = allowed.includes('ranking_sdr') && sdrRanking !== null;
+  // Link só de ranking = tela cheia; misturado com outras métricas vira card.
+  const onlySdrRanking = showSdrRanking && allowed.every((m: string) => m === 'ranking_sdr');
 
   const metaPct = Math.round((kpis.monthRevenue / kpis.monthGoal) * 100);
 
@@ -208,8 +219,15 @@ export function TVPage() {
         </div>
       </div>
 
-      {/* Grid de Cards 3x3 */}
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1.2fr 1.3fr 1.2fr', gap: 16, padding: 20 }}>
+      {onlySdrRanking ? (
+        <div style={{ flex: 1, minHeight: 0, padding: 20 }}>
+          <div style={cardStyle({ height: '100%' })}>
+            <SdrRankingPanel data={sdrRanking} theme={themeColors} defaultPeriod={tvData?.rankingPeriod} />
+          </div>
+        </div>
+      ) : (
+      /* Grid de Cards 3x3 */
+      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: 'minmax(0, 1.2fr) minmax(0, 1.3fr) auto', gap: 16, padding: 20 }}>
         
         {/* Card 1 — Meta do Mês */}
         {allowed.includes('meta_pct') ? (
@@ -321,9 +339,39 @@ export function TVPage() {
           </div>
         )}
 
+        {/* Card 4.5 — Reuniões e Visitas do mês com origem (slides 2 e 10) */}
+        {showAgenda && (
+          <div style={cardStyle({ gridColumn: 'span 3' })}>
+            <div style={capStyle}>
+              <Icon name="CalendarCheck" size={16} color={themeColors.accent} />
+              Agenda do Mês — Inbound × Outbound
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 6 }}>
+              {([
+                { label: 'Reuniões Agendadas', d: agenda.meetings },
+                { label: 'Visitas Agendadas',  d: agenda.visits   },
+              ] as const).map(({ label, d }) => (
+                <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ color: themeColors.textMuted, fontSize: 13, fontWeight: 600 }}>{label}</div>
+                  <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums', color: '#fff' }}>
+                    {d?.total ?? 0}
+                  </div>
+                  <div style={{ display: 'flex', gap: 14, fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    <span style={{ color: '#7FB3FF' }}>{d?.inbound ?? 0} Inbound</span>
+                    <span style={{ color: themeColors.accent }}>{d?.outbound ?? 0} Outbound</span>
+                    {d?.unresolved ? (
+                      <span style={{ color: themeColors.textMuted }}>{d.unresolved} sem origem</span>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Card 5 — Leaderboards Flexíveis */}
         {showPoints || showCoins ? (
-          <div style={cardStyle({ gridColumn: 'span 3' })}>
+          <div style={cardStyle({ gridColumn: 'span 3', padding: '14px 24px' })}>
             <div style={capStyle}>
               <Icon name="Zap" size={16} color="#FFE08A" />
               Leaderboards Comerciais ao Vivo
@@ -336,7 +384,7 @@ export function TVPage() {
                   <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: themeColors.textMuted, marginBottom: 4 }}>
                     🏆 Ranking Geral de Pontos
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, justifyContent: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, justifyContent: 'center' }}>
                     {pointsRanking.slice(0, 3).map((p: any, i: number) => {
                       const isFirst = i === 0;
                       return (
@@ -345,7 +393,7 @@ export function TVPage() {
                           className="row"
                           style={{
                             gap: 12,
-                            padding: '6px 14px',
+                            padding: '4px 14px',
                             borderRadius: 8,
                             background: isFirst ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.02)',
                             border: isFirst ? `1px solid ${themeColors.accent}55` : '1px solid transparent',
@@ -378,7 +426,7 @@ export function TVPage() {
                   <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: themeColors.textMuted, marginBottom: 4 }}>
                     🪙 Ranking de Moedas (Q Atual)
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, justifyContent: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, justifyContent: 'center' }}>
                     {coinsRanking.slice(0, 3).map((p: any, i: number) => {
                       const isFirst = i === 0;
                       return (
@@ -387,7 +435,7 @@ export function TVPage() {
                           className="row"
                           style={{
                             gap: 12,
-                            padding: '6px 14px',
+                            padding: '4px 14px',
                             borderRadius: 8,
                             background: isFirst ? 'rgba(255,255,255,.08)' : 'rgba(255,255,255,.02)',
                             border: isFirst ? '1px solid #D9770655' : '1px solid transparent',
@@ -423,7 +471,15 @@ export function TVPage() {
           </div>
         )}
 
+        {/* Card — Ranking do Time de SDRs (Fase B do PLANO_DESENHO_CRM_2) */}
+        {showSdrRanking && (
+          <div style={cardStyle({ gridColumn: 'span 3' })}>
+            <SdrRankingPanel data={sdrRanking} theme={themeColors} defaultPeriod={tvData?.rankingPeriod} />
+          </div>
+        )}
+
       </div>
+      )}
     </div>
   );
 }

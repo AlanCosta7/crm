@@ -71,6 +71,16 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    // Fase 5.1 do PLANO_DESENHO_CRM.md — quem RECEBE comissão (BDR/SDR/Rep) só
+    // enxergava o item se fosse master/manager. Master/manager já têm
+    // Comissões + Relatório na seção "Atividades" — não precisam deste.
+    section: 'Comissão',
+    roles: ['bdr', 'sdr', 'rep'],
+    items: [
+      { id: 'minha-comissao', label: 'Minha Comissão', icon: 'Wallet', path: '/minha-comissao' },
+    ],
+  },
+  {
     section: 'Gamificação',
     roles: ['master', 'manager', 'bdr', 'sdr', 'rep'],
     items: [
@@ -94,6 +104,15 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    // Fase 5.4 do PLANO_DESENHO_CRM.md — único item de menu do papel
+    // `financeiro`; o resto do fluxo dele é o e-mail do dia 09.
+    section: 'Financeiro',
+    roles: ['financeiro' as UserRole, 'master', 'manager'],
+    items: [
+      { id: 'financeiro-contratos', label: 'Contratos Comodato', icon: 'FileCheck2', path: '/financeiro/contratos' },
+    ],
+  },
+  {
     section: 'Análise',
     roles: ['master', 'manager', 'viewer'],
     items: [
@@ -107,6 +126,7 @@ const NAV: NavSection[] = [
       { id: 'settings', label: 'Configurações', icon: 'Settings', path: '/settings' },
       { id: 'metas',    label: 'Metas',          icon: 'Target',  path: '/settings/metas' },
       { id: 'cadencia-config', label: 'Cadência', icon: 'CalendarClock', path: '/settings/cadencia' },
+      { id: 'templates-config', label: 'Templates', icon: 'FileText', path: '/settings/templates' },
     ],
   },
 ];
@@ -153,8 +173,17 @@ export function Sidebar() {
   const { hasPermission, getRoleName } = usePermissions();
 
   const handleLogout = () => {
+    // A chamada de auditoria (Fase 6.1) precisa sair ANTES do signOut — depois
+    // dele o token cai e a callable seria rejeitada como não-autenticada.
+    Promise.all([
+      import('../../config/firebase'),
+      import('firebase/functions'),
+    ]).then(([{ auth, functions }, { httpsCallable }]) => {
+      httpsCallable(functions, 'logSessionEvent')({ event: 'logout' }).catch((err) => {
+        console.warn('Não foi possível registrar o logout na auditoria:', err);
+      }).finally(() => auth.signOut());
+    });
     useAuthStore.getState().setUser(null);
-    import('../../config/firebase').then(({ auth }) => auth.signOut());
   };
 
   const isItemActive = (path: string, id: string) => {

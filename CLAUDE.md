@@ -14,16 +14,18 @@ CRM SaaS B2B para times comerciais do setor de varejo/distribuição (WizMart e 
 - `wizmart` — Varejo e Distribuição (verde `#1A6B1A` / lima `#8DB600`)
 - `smart_cafe` — Café e Bebidas (marrom `#92400E` / âmbar `#D97706`)
 
-**Roles RBAC (6):**
+**Roles RBAC (8):**
 
 | Role | Descrição |
 |---|---|
 | `master` | Admin total — configura tudo, vê tudo |
 | `manager` | Gestor comercial — KPIs completos, configura cadência |
-| `bdr` | Gera leads e distribui para fila SDR |
+| `bdr` | Gera leads e os atribui manualmente aos SDRs |
 | `sdr` | Executa cadência diária, faz handoff |
 | `rep` | Recebe handoffs, fecha negócios |
 | `viewer` | Somente leitura |
+| `design` | Fila de projetos de layout — sem perfil em `DEFAULT_ROLES` do Settings; o admin cria o Perfil "Design" pela aba Perfis antes de conseguir convidar alguém com este papel |
+| `financeiro` | Fase 5.4 do PLANO_DESENHO_CRM.md — só valida contrato de Comodato Smart Café (marca `contractPaidAt`); mesmo caminho de criação do Perfil que `design` |
 
 ---
 
@@ -34,7 +36,7 @@ CRM SaaS B2B para times comerciais do setor de varejo/distribuição (WizMart e 
 firebase emulators:start --only auth,firestore,database,functions
 
 # Popular emuladores com dados de teste (6 roles + 2 produtos)
-node scripts/seed-emulators.mjs
+node scripts/seed/seed-emulators.mjs
 
 # Dev server (Node 22 obrigatório)
 nvm use 22 && npm run dev
@@ -133,7 +135,7 @@ src/
 
 | Coleção | Escrita | Leitura |
 |---|---|---|
-| `deals` | bdr/sdr/rep (via permissões) | todos |
+| `deals` | bdr/sdr/rep (via permissões); BDR, Gestor e Master editam qualquer card (`manage_deal_cards`) | todos |
 | `funnels` | manager/master | todos |
 | `contacts` | operacional (não viewer) | todos |
 | `activities` | Cloud Functions | todos |
@@ -144,7 +146,17 @@ src/
 | `templates` | manager/master | operacional |
 | `calendar_tokens` | Cloud Functions HTTP | owner/master |
 | `kpi_snapshots` | Cloud Functions | todos |
+| `roles` | master | todos (Configurações › Perfis; sem documento vale o padrão de `utils/rolePermissions.ts`) |
 | `settings` | master | master |
+| `user_sessions` | Cloud Functions | manager/master (Fase 6.1 — auditoria de login/logoff/encerramento forçado) |
+| `project_requests` | operacional (create, com `ownerUid`); design/manager/master (update) | operacional (PLANO_DESENHO_CRM_2 Fase A — anexos em Storage `.../project_requests/{id}/{request\|delivery}/...`) |
+| `sdr_events` | Cloud Functions (`onDealStageChanged`) | manager/master (PLANO_DESENHO_CRM_2 Fase B — passagens de etapa que alimentam o Ranking de SDRs na TV) |
+
+> **Bloqueio de acesso (set/2026):** `isTenant()` nas `firestore.rules` consulta
+> `users/{uid}.isActive` via `get()` a cada avaliação — usuário bloqueado é negado
+> na hora, em toda coleção. Consequências para quem mexe em rules ou testes:
+> perfil inexistente = acesso negado, e **todo contexto autenticado num teste de
+> rules precisa semear o perfil** (use `seedRulesUsers` de `tests/rules/fixtures.ts`).
 
 ### Realtime Database
 
@@ -198,6 +210,8 @@ VITE_USE_EMULATORS=true
 
 ## 8. Cloud Functions — Mapa
 
+> **Descoberta de tenants (13/09/2026):** todo cron que varre "todos os tenants" usa `listActiveTenantIds(db)` de `functions/src/shared/tenants.ts` — NUNCA `db.collection("tenants").get()` diretamente. Não existe documento em `tenants/{tenantId}`, só subcoleções; a coleção `tenants` sempre vem vazia numa query direta. `listActiveTenantIds` descobre por collection group query em `users`. Afeta `dailyCadenceEngine`, `kpiAggregator`, `tvDataRefresher`, `commissionEvaluationQueue`, `contractReminderEmail` e `repSlaChecker`/`activityOverdueChecker` — ver PLANO_DESENHO_CRM.md, seção "Achado crítico".
+
 ### Implementadas
 | Função | Trigger / Tipo | Propósito |
 |---|---|---|
@@ -206,8 +220,10 @@ VITE_USE_EMULATORS=true
 | `onDealWon` | Firestore onUpdate `/deals/{id}` | Distribui moedas de faturamento/PDV |
 | `onTokenChange` | Firestore onWrite `/settings/tv` | Sincroniza configurações e permissões da TV |
 | `syncMoskit` | HTTP Callable | Importação em lote via Cloud Tasks (adiada/mock) |
-| `onDealStageChanged` | Firestore onUpdate `/deals/{id}` | Dispara convergência do lead para funil Hunter |
-| `dailyCadenceEngine` | Cron (PubSub) 7h BRT | Distribuição diária de novos cards e fechamento da fila |
+| `onDealStageChanged` | Firestore onUpdate `/deals/{id}` | Dispara convergência do lead para funil Hunter. Ao entrar em etapa de agendamento (reunião/visita/degustação), quebra a cadência diária e instala a régua de agenda (`applyAgendaRuler`); ao sair dela (realizado, perda, volta), cancela a régua (`cancelAgendaRuler`) |
+| `onDealParticipantsChanged` | Firestore onWrite `/deals/{id}` | Campos derivados do deal: `participantIds`, `responsibleId` e `origin` (Inbound/Outbound) |
+| `onDealResponsibleChanged` | Firestore onUpdate `/deals/{id}` | Ao trocar `assignedSdrId`/`assignedRepId` ("Trocar responsável", `manage_deal_cards`), move as atividades `pending` do card para o novo responsável, apaga duplicatas, acerta o Google Calendar e tira o card da fila do dia do SDR antigo. Não mexe em `assignedAt` |
+| `dailyCadenceEngine` | Cron (PubSub) 7h BRT | Gera a fila diária do SDR (passos da régua dos leads já atribuídos — NÃO distribui leads: a atribuição BDR→SDR é manual, via `AssignSdrModal`). Carimba o bloco de horário (`blockId`/`scheduledAt`) de cada atividade |
 | `acceptHandoff` | HTTP Callable | Aceita passagem de bastão de SDR e move para pipeline do Rep |
 | `declineHandoff` | HTTP Callable | Recusa passagem de bastão de SDR informando motivo |
 | `repSlaChecker` | Cron (PubSub) 8h BRT | Monitora o prazo de 3 dias úteis para primeiro contato do Rep |
@@ -222,6 +238,11 @@ VITE_USE_EMULATORS=true
 | `disconnectCalendar` | HTTP Callable | Remove os tokens e desvincula a conta do Google Agenda |
 | `kpiAggregator` | Cron (PubSub) Horário | Consolida relatórios e salva snapshots na coleção `/kpi_snapshots` |
 | `tvDataRefresher` | Cron (PubSub) 5min | Consolida dados de liderança e geolocalização para as TVs |
+| `onUserProfileWritten` | Firestore onWrite `/users/{uid}` | Espelha papel, produtos e bloqueio de acesso do documento nas custom claims do token; revoga sessão e desabilita a conta no Auth. Guarda o último master ativo |
+| `commissionEvaluationQueue` | Cron (PubSub) dia 10, 9h BRT | Monta a fila de avaliação de comissão do mês (ativações do mês anterior sem comissão registrada) |
+| `contractReminderEmail` | Cron (PubSub) dia 09, 9h BRT | Fase 5.4 do PLANO_DESENHO_CRM.md — avisa por e-mail cada usuário `financeiro` ativo sobre contratos de Comodato Smart Café com PDF anexado e pagamento ainda não confirmado. Véspera proposital de `commissionEvaluationQueue` |
+| `logSessionEvent` | HTTP Callable | Fase 6.1 do PLANO_DESENHO_CRM.md — registra login/logoff em `user_sessions` (IP e resumo de User-Agent capturados no servidor); no login também atualiza `users/{uid}.lastLoginAt` |
+| `endUserSession` | HTTP Callable | Fase 6.1 do PLANO_DESENHO_CRM.md — master/manager derruba a sessão ativa de um usuário (`revokeRefreshTokens`) sem bloquear a conta; grava evento `revoked` em `user_sessions` |
 
 ---
 
@@ -236,7 +257,7 @@ VITE_USE_EMULATORS=true
 | `stores.test.ts` | authStore (6 roles) + uiStore (productId, sidebar) |
 | `dashboard.test.tsx` | Seleção de painel por role (9 casos) |
 | `funnelUtils.test.ts` | Convergência, handoff, validação form, SLA, roles, templates (46 casos) |
-| `cadenceUtils.test.ts` | Fórmula de cards, taxa de conclusão, data BRT, cenários completos (22 casos) |
+| `cadenceUtils.test.ts` | Taxa de conclusão, data BRT, régua de contato e tipos de atividade |
 | `cadencia.test.tsx` | CadenciaPage por estado (loading/vazio/cards), interação, métricas (18 casos) |
 | `handoffUtils.test.ts` | addBusinessDays, SLA, validateNextActionForm, permissões (26 casos) |
 | `handoffs.test.tsx` | HandoffsPage tabs, filtros por role, modal de recusa, badge (13 casos) |
@@ -252,6 +273,17 @@ VITE_USE_EMULATORS=true
 | `contacts.test.tsx` | ContactsPage listagem de clientes, criação de contato, multi-produto (12 casos) |
 | `companies.test.tsx` | CompaniesPage lista de empresas, fallbacks numéricos para dados incompletos (8 casos) |
 | `productScope.test.ts`| allowedProductIds, matchesProductId, matchesProductIds e permissões (18 casos) |
+| `rolePermissions.test.ts` | Permissões efetivas do perfil: padrão do código, documento salvo, rollout por `permissionsRev` (8 casos) |
+| `tests/rules/roles.rules.test.ts` | Regra de `roles` (master grava, todos leem) e `manage_deal_cards` vindo do documento do perfil (15 casos) |
+| `dealResponsible.test.ts` | Autorização `manage_deal_cards` — qual campo define o responsável do card e quem pode assumi-lo (10 casos) |
+| `reassignCarteira.test.ts` | Fase 6.2 — quais deals abertos reatribuir ao inativar sdr/rep (6 casos) |
+| `AuditoriaPane.test.tsx` | Fase 6.1 — tabela de login/logoff/encerramento, rótulos e estado vazio (4 casos) |
+| `dealActivities.test.ts` | Slide 5 (Fase 2.6) — separação de atividades do card em "Próximas na Cadência" vs "Histórico" (7 casos) |
+| `functions/src/deals/reassignPendingActivities.test.ts` | Detecção de troca de responsável (de → para) e limpeza da fila do dia (11 casos). Movimentação real: `npm run test:reassign-activities` (emulador) |
+| `rankingSdr.test.ts` / `sdrEvents.test.ts` (functions) | Ranking de SDRs na TV: períodos em BRT, ordenação por visitas, privacidade do payload, eventos idempotentes (23 casos) |
+| `sdrRanking.test.tsx` | Painel de pódio + lista + filtro de período e gate por `ranking_sdr` no TVPage (10 casos) |
+| `projectAccess/projectRequestForm/projectAttachments/dealTimeline` + `projectEvents` (functions) + `tests/rules/projeto-storage`, `project-requests` | Fase A — botão por participação, teto 10, validação de anexos, eventos e avisos, rules. Fluxo: `npm run test:project-flow`; e2e: `tests/solicitar-projeto.spec.ts` |
+| `functions/src/shared/tenants.test.ts` | Descoberta de tenants via collection group query em `users`, dedup, lista vazia (4 casos) |
 
 **Executar todos:** `npm run test -- --run`
 

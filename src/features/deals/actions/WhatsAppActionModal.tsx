@@ -12,6 +12,7 @@ import { useFirestoreCollection } from '../../../hooks/useFirestore';
 import { useAuthStore } from '../../../stores/authStore';
 import { fmtCurrency } from '../../../utils/crmFormat';
 import { renderTemplate } from '../../../utils/templateRender';
+import { resolveDealContact } from '../../../utils/dealContact';
 import { useLogActivity } from './useLogActivity';
 
 interface Props {
@@ -34,7 +35,7 @@ export function WhatsAppActionModal({ deal, contacts, onClose, onPoints }: Props
   const { logActivity } = useLogActivity(deal, onPoints);
   const { data: templates } = useFirestoreCollection<PlaybookTemplate>('templates');
 
-  const contact = contacts.find(c => c.company === deal.company);
+  const contact = resolveDealContact(deal, contacts);
   const prodLabel = deal.productId === 'smart_cafe' ? 'Smart Café' : 'WizMart';
 
   const ctx = useMemo(() => ({

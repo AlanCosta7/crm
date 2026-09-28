@@ -1,6 +1,29 @@
+/**
+ * activities.test.tsx — timeline (aba Histórico) da página de Atividades
+ *
+ * Desde a Fase 2 do PLANO_DESENHO_CRM.md a página tem duas abas, e o SDR abre
+ * na fila do dia ("Meu Dia"). A timeline que estes testes cobrem passou a viver
+ * na aba "Histórico" — daí o `abrirHistorico()` antes das asserções.
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ActivitiesPage } from './ActivitiesPage';
+
+vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+
+// A tela assina `settings/cadence` para ler os blocos de horário. Mockar o
+// módulo de config evita inicializar o Firebase de verdade no teste; mockar
+// `firebase/firestore` inteiro não serve, porque é o próprio config que chama
+// `getFirestore`.
+vi.mock('../../config/firebase', () => ({
+  db: {}, auth: {}, rtdb: {}, storage: {}, functions: {},
+}));
+vi.mock('firebase/firestore', async (original) => ({
+  ...(await original<Record<string, unknown>>()),
+  doc: () => ({}),
+  onSnapshot: () => () => {},
+}));
 
 vi.mock('../../stores/uiStore', () => ({
   useUIStore: () => ({ productId: 'all', productScope: 'all' }),
@@ -30,6 +53,11 @@ vi.mock('../../hooks/useFirestore', () => ({
   },
 }));
 
+/** O SDR abre em "Meu Dia"; a timeline vive na aba "Histórico". */
+function abrirHistorico() {
+  fireEvent.click(screen.getByRole('button', { name: 'Histórico' }));
+}
+
 describe('ActivitiesPage - Timeline de Atividades', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,14 +65,26 @@ describe('ActivitiesPage - Timeline de Atividades', () => {
     mockActivities = [];
   });
 
+  // Fase 2 — slide 9: o SDR entra pela fila do dia, não pelo histórico.
+  it('o SDR abre na aba Meu Dia, com a régua de blocos', () => {
+    render(<ActivitiesPage />);
+    // "Pausa" aparece duas vezes no bloco das 12h: como rótulo e como selo.
+    expect(screen.getAllByText('Pausa').length).toBeGreaterThan(0);
+    expect(screen.getByText('10h')).toBeInTheDocument();
+    expect(screen.getByText('13h–15h')).toBeInTheDocument();
+    expect(screen.queryByText('Nenhuma atividade registrada')).toBeNull();
+  });
+
   it('deve exibir mensagem de carregamento se loading for true', () => {
     mockLoading = true;
     render(<ActivitiesPage />);
+    abrirHistorico();
     expect(screen.getByText('Carregando timeline de atividades...')).toBeInTheDocument();
   });
 
   it('deve exibir estado vazio se nenhuma atividade for encontrada', () => {
     render(<ActivitiesPage />);
+    abrirHistorico();
     expect(screen.getByText('Nenhuma atividade registrada')).toBeInTheDocument();
     expect(screen.getByText('As atividades aparecem automaticamente quando tarefas são concluídas no pipeline.')).toBeInTheDocument();
   });
@@ -70,6 +110,7 @@ describe('ActivitiesPage - Timeline de Atividades', () => {
     ];
 
     render(<ActivitiesPage />);
+    abrirHistorico();
 
     // Deve mostrar as atividades na timeline
     expect(screen.getByText('enviou mensagem de WhatsApp para cliente')).toBeInTheDocument();
@@ -98,10 +139,12 @@ describe('ActivitiesPage - Timeline de Atividades', () => {
     ];
 
     render(<ActivitiesPage />);
+    abrirHistorico();
 
-    // Clica no filtro "WhatsApp"
-    const whatsappFilter = screen.getByText('WhatsApp');
-    fireEvent.click(whatsappFilter);
+    // Clica no chip "WhatsApp" — getAllByText porque "WhatsApp" também é nome
+    // de bloco de horário; o chip é o último da lista de filtros.
+    const chips = screen.getAllByText('WhatsApp');
+    fireEvent.click(chips[chips.length - 1]);
 
     // Apenas a atividade de WhatsApp deve estar visível
     expect(screen.getByText('enviou mensagem de WhatsApp para cliente')).toBeInTheDocument();

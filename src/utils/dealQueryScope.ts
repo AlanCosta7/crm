@@ -5,7 +5,7 @@
  *
  * O Firestore rejeita POR INTEIRO uma query sem `where` que combine com a
  * rule quando ela depende de campo do documento (comprovado em
- * scripts/test-deal-read-rules-emulator.mjs) — não filtra silenciosamente os
+ * scripts/test-emulator/test-deal-read-rules-emulator.mjs) — não filtra silenciosamente os
  * docs que a rule barraria. Por isso toda tela que lê `deals` sem nenhum
  * filtro precisa deste constraint para BDR/SDR/Rep; manager/master/viewer/
  * design têm bypass na rule (`canSeeAllDeals`) e não devem receber o filtro,
@@ -18,11 +18,20 @@ const ROLES_WITH_FULL_DEAL_ACCESS = new Set(['master', 'manager', 'viewer', 'des
 
 /**
  * Constraint a passar como 2º argumento de `useFirestoreCollection<Deal>('deals', ...)`.
- * Vazio para papéis com leitura ampla (mesmo critério da rule `canSeeAllDeals`);
- * `participantIds array-contains uid` para os demais (bdr/sdr/rep).
+ * Vazio para papéis com leitura ampla (rule `canSeeAllDeals`) e para quem tem a
+ * autorização `manage_deal_cards` (rule `canManageAllDeals` — BDR por padrão,
+ * ou qualquer perfil que o master tenha liberado); `participantIds array-contains
+ * uid` para os demais.
+ *
+ * `canManageAllDeals` deve vir de `hasPermission('manage_deal_cards')`: a
+ * permissão, e não o papel, decide — se o master a tirar do perfil BDR, a rule
+ * volta a exigir o filtro e uma query sem `where` seria rejeitada por inteiro.
  */
-export function dealParticipantConstraint(user: Pick<UserState, 'uid' | 'role'> | null | undefined): QueryConstraint[] {
+export function dealParticipantConstraint(
+  user: Pick<UserState, 'uid' | 'role'> | null | undefined,
+  canManageAllDeals = false,
+): QueryConstraint[] {
   if (!user?.uid) return [];
-  if (ROLES_WITH_FULL_DEAL_ACCESS.has(user.role)) return [];
+  if (canManageAllDeals || ROLES_WITH_FULL_DEAL_ACCESS.has(user.role)) return [];
   return [where('participantIds', 'array-contains', user.uid)];
 }

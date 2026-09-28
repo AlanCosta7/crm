@@ -16,6 +16,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { getTodayBRT, normalizeCadenceConfig } from "./cadenceUtils";
+import { listActiveTenantIds } from "../shared/tenants";
 
 export const repSlaChecker = onSchedule(
   {
@@ -31,10 +32,11 @@ export const repSlaChecker = onSchedule(
 
     console.log(`[repSlaChecker] Iniciando verificação de SLA para ${todayBRT}`);
 
-    const tenantsSnap = await db.collection("tenants").get();
+    // Ver functions/src/shared/tenants.ts — não existe documento em
+    // tenants/{tenantId}, só subcoleções.
+    const tenantIds = await listActiveTenantIds(db);
 
-    for (const tenantDoc of tenantsSnap.docs) {
-      const tenantId = tenantDoc.id;
+    for (const tenantId of tenantIds) {
       try {
         await checkRepsForTenant(db, tenantId);
       } catch (err) {
@@ -223,11 +225,11 @@ export const activityOverdueChecker = onSchedule(
 
     console.log(`[activityOverdueChecker] Rodando em ${now.toISOString()}`);
 
-    const tenantsSnap = await db.collection("tenants").get();
+    // Ver functions/src/shared/tenants.ts — não existe documento em
+    // tenants/{tenantId}, só subcoleções.
+    const tenantIds = await listActiveTenantIds(db);
 
-    for (const tenantDoc of tenantsSnap.docs) {
-      const tenantId = tenantDoc.id;
-
+    for (const tenantId of tenantIds) {
       try {
         // Busca atividades pending onde dueAt < agora e overdueNotifiedAt não foi hoje
         const overdueSnap = await db

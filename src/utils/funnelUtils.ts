@@ -7,7 +7,7 @@
  * Regras de negócio documentadas em REQUISITOS-V2.md §4 e ADR-006.
  */
 
-import type { Funnel, FunnelStage, FunnelType, Deal, UserRole } from '../types/crm';
+import type { Funnel, FunnelStage, FunnelType, Deal, UserRole, ProductId, DealOrigin } from '../types/crm';
 
 // ── Lookup de funis ───────────────────────────────────────────────────────────
 
@@ -208,4 +208,86 @@ export function applyTemplate(body: string, vars: TemplateVars): string {
     const value = vars[key as keyof TemplateVars];
     return value !== undefined ? value : match;
   });
+}
+
+// ── Boards do Pipeline — visão única por produto (Fase 1.3) ───────────────────
+
+/**
+ * O deck "Desenho CRM" (slide 1) pede uma visão ÚNICA do pipe: "Sem distinção
+ * entre Inbound e Outbound". Até aqui o Pipeline montava uma aba por funil, o
+ * que produzia quatro boards para o mesmo produto (`BDR - Outbound`,
+ * `Inbound — WizMart`, `Outbound — WizMart`, `WizMart`) — a separação era
+ * estrutural, não uma preferência de visualização.
+ *
+ * `pipelineBoards` resolve isso escolhendo UM board por produto:
+ *  - se o produto tem funil unificado (`type: 'main'`), ele é o board, e os
+ *    funis legados do mesmo produto deixam de virar aba;
+ *  - se não tem (tenant que nunca rodou o `sync-main-funnels-prod`), cai nos
+ *    funis legados como antes — a migração não pode escurecer o pipe de quem
+ *    ainda não migrou.
+ *
+ * A origem do lead não desaparece: virou `Deal.origin`, exibida no card e
+ * filtrável (`filterDealsByOrigin`).
+ */
+export function pipelineBoards(
+  funnels: Funnel[],
+  role: UserRole,
+  matchesProduct: (productId: ProductId | undefined) => boolean,
+): Funnel[] {
+  const allowedTypes = visibleFunnelTypes(role);
+  const visible = funnels
+    .filter(f => f.isActive && allowedTypes.includes(f.type))
+    .filter(f => matchesProduct(f.productId));
+
+  const mainByProduct = new Map<string, Funnel>();
+  for (const f of visible) {
+    if (f.type === 'main') mainByProduct.set(f.productId ?? 'wizmart', f);
+  }
+
+  // Produto com funil unificado: só ele vira aba. Sem funil unificado: mantém
+  // os legados, para o pipe não ficar vazio em tenant não migrado.
+  const boards = visible.filter(f =>
+    f.type === 'main' || !mainByProduct.has(f.productId ?? 'wizmart'),
+  );
+
+  // Ordem estável: produto unificado primeiro, depois legados, cada grupo por nome.
+  return boards.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
+/**
+ * O deal pertence a este board?
+ *
+ * Board unificado casa por PRODUTO, não por `funnelId` — é o que faz um deal
+ * preso num funil legado (`Inbound — WizMart`) aparecer no board único do
+ * WizMart sem precisar migrar o documento primeiro. Board legado continua
+ * casando por `funnelId`, senão dois boards legados do mesmo produto
+ * mostrariam os mesmos cards.
+ */
+export function dealBelongsToBoard(deal: Deal, board: Funnel | undefined): boolean {
+  if (!board) return true;
+  if (board.type === 'main') {
+    return (deal.productId ?? 'wizmart') === (board.productId ?? 'wizmart');
+  }
+  return deal.funnelId === board.id;
+}
+
+/** Origem do deal com o default de leitura: ausente = 'outbound' (igual ao servidor). */
+export function dealOrigin(deal: Deal): DealOrigin {
+  return deal.origin === 'inbound' ? 'inbound' : 'outbound';
+}
+
+/** Filtro de origem do Pipeline. 'all' não filtra nada. */
+export function filterDealsByOrigin(deals: Deal[], filter: 'all' | DealOrigin): Deal[] {
+  if (filter === 'all') return deals;
+  return deals.filter(d => dealOrigin(d) === filter);
+}
+
+/** Contagem por origem — alimenta a quebra "1 Inbound / 2 Outbound" do slide 2. */
+export function countByOrigin(deals: Deal[]): { inbound: number; outbound: number; total: number } {
+  let inbound = 0;
+  for (const d of deals) if (dealOrigin(d) === 'inbound') inbound++;
+  return { inbound, outbound: deals.length - inbound, total: deals.length };
 }

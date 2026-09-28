@@ -20,6 +20,7 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { listActiveTenantIds } from "../shared/tenants";
 
 // Estágios que marcam ativação (espelha onDealWon/onDealStageChanged)
 const CONQUEST_STAGES = ["inaugurado", "instalacao_realizada"];
@@ -53,9 +54,10 @@ export const commissionEvaluationQueue = onSchedule(
 
     console.log(`[commissionEvaluationQueue] ciclo ${cicloKey} — avaliando ativações de ${priorMonth}`);
 
-    const tenantsSnap = await db.collection("tenants").get();
-    for (const tenantDoc of tenantsSnap.docs) {
-      const tenantId = tenantDoc.id;
+    // Ver functions/src/shared/tenants.ts — não existe documento em
+    // tenants/{tenantId}, só subcoleções.
+    const tenantIds = await listActiveTenantIds(db);
+    for (const tenantId of tenantIds) {
       try {
         await processarTenant(db, tenantId, cicloKey, priorMonth);
       } catch (err) {

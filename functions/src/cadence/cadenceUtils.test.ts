@@ -1,104 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  pickBalancedCandidates,
   normalizeCadenceConfig,
   findCadenceStep,
   DEFAULT_SDR_CADENCE_STEPS,
 } from "./cadenceUtils";
-
-interface TestCandidate {
-  id: string;
-  size: "P" | "M" | "G";
-}
-
-const ZERO = { P: 0, M: 0, G: 0 };
-
-describe("pickBalancedCandidates", () => {
-  it("SDR sem cards nenhum: prioriza P (empate resolvido por P > M > G)", () => {
-    const candidates: TestCandidate[] = [
-      { id: "g1", size: "G" },
-      { id: "m1", size: "M" },
-      { id: "p1", size: "P" },
-    ];
-    const picked = pickBalancedCandidates(candidates, 1, ZERO);
-    expect(picked.map(c => c.id)).toEqual(["p1"]);
-  });
-
-  it("SDR já tem 3 G e 0 P: próxima vaga prioriza P mesmo não sendo o mais recente", () => {
-    // Fila em ordem de recência: G é o mais recente, P é o mais antigo.
-    const candidates: TestCandidate[] = [
-      { id: "g-recent", size: "G" },
-      { id: "m-mid",    size: "M" },
-      { id: "p-old",    size: "P" },
-    ];
-    const bySize = { P: 0, M: 0, G: 3 };
-    const picked = pickBalancedCandidates(candidates, 1, bySize);
-    expect(picked.map(c => c.id)).toEqual(["p-old"]);
-  });
-
-  it("dentro do mesmo porte, mantém a ordem de recência recebida", () => {
-    const candidates: TestCandidate[] = [
-      { id: "p-recent", size: "P" },
-      { id: "p-older",  size: "P" },
-      { id: "p-oldest", size: "P" },
-    ];
-    const picked = pickBalancedCandidates(candidates, 2, ZERO);
-    expect(picked.map(c => c.id)).toEqual(["p-recent", "p-older"]);
-  });
-
-  it("porte preferido sem candidato disponível: cai pro próximo mais defasado", () => {
-    // SDR defasado em P, mas não há nenhum P na fila — M e G empatados em 5,
-    // o desempate P > M > G decide por M antes de G.
-    const candidates: TestCandidate[] = [
-      { id: "g1", size: "G" },
-      { id: "m1", size: "M" },
-    ];
-    const bySize = { P: 0, M: 5, G: 5 };
-    const picked = pickBalancedCandidates(candidates, 1, bySize);
-    expect(picked.map(c => c.id)).toEqual(["m1"]);
-  });
-
-  it("nenhuma preferência tem candidato disponível: cai pra recência pura", () => {
-    // SDR defasado em P e M (ambos com déficit), mas só há G na fila.
-    const candidates: TestCandidate[] = [
-      { id: "g-recent", size: "G" },
-      { id: "g-older",  size: "G" },
-    ];
-    const bySize = { P: 10, M: 10, G: 0 };
-    const picked = pickBalancedCandidates(candidates, 2, bySize);
-    expect(picked.map(c => c.id)).toEqual(["g-recent", "g-older"]);
-  });
-
-  it("preenche várias vagas alternando o porte conforme cada escolha atualiza a defasagem", () => {
-    // 2 P e 2 G na fila, SDR zerado — deve alternar P, G, P, G (P sempre
-    // vence o empate contra G até ficarem parelhos, daí decide por G ter
-    // ficado mais defasado depois do 1º P escolhido... vamos conferir o
-    // comportamento real, não adivinhar).
-    const candidates: TestCandidate[] = [
-      { id: "p1", size: "P" },
-      { id: "g1", size: "G" },
-      { id: "p2", size: "P" },
-      { id: "g2", size: "G" },
-    ];
-    const picked = pickBalancedCandidates(candidates, 4, ZERO);
-    expect(picked.map(c => c.id).sort()).toEqual(["g1", "g2", "p1", "p2"]);
-    // As duas primeiras vagas não podem ser do mesmo porte (senão o SDR
-    // ficaria com 2 do mesmo antes de tocar no outro, quebrando o objetivo
-    // de equilibrar).
-    expect(picked[0].size).not.toBe(picked[1].size);
-  });
-
-  it("count maior que candidatos disponíveis: pega todos, sem duplicar nem quebrar", () => {
-    const candidates: TestCandidate[] = [{ id: "p1", size: "P" }];
-    const picked = pickBalancedCandidates(candidates, 5, ZERO);
-    expect(picked).toHaveLength(1);
-  });
-
-  it("count zero: não escolhe nada", () => {
-    const candidates: TestCandidate[] = [{ id: "p1", size: "P" }];
-    expect(pickBalancedCandidates(candidates, 0, ZERO)).toEqual([]);
-  });
-});
 
 describe("DEFAULT_SDR_CADENCE_STEPS / findCadenceStep — régua padrão do documento", () => {
   it("tem 9 passos, começando em D0 e terminando em D+29", () => {
@@ -148,22 +53,19 @@ describe("DEFAULT_SDR_CADENCE_STEPS / findCadenceStep — régua padrão do docu
 });
 
 describe("normalizeCadenceConfig", () => {
-  it("config ausente cai pro padrão (3 cards/dia, SLA de 3 dias úteis, régua do documento)", () => {
+  it("config ausente cai pro padrão (SLA de 3 dias úteis, régua do documento)", () => {
     const cfg = normalizeCadenceConfig(null);
-    expect(cfg.newCardsPerDay).toBe(3);
     expect(cfg.repFirstContactBusinessDays).toBe(3);
     expect(cfg.steps).toEqual(DEFAULT_SDR_CADENCE_STEPS);
   });
 
   it("respeita valores configurados dentro do intervalo válido", () => {
-    const cfg = normalizeCadenceConfig({ sdr: { newCardsPerDay: 5 }, rep: { firstContactBusinessDays: 2 } });
-    expect(cfg.newCardsPerDay).toBe(5);
+    const cfg = normalizeCadenceConfig({ rep: { firstContactBusinessDays: 2 } });
     expect(cfg.repFirstContactBusinessDays).toBe(2);
   });
 
   it("valores fora do intervalo são limitados (clamp)", () => {
-    const cfg = normalizeCadenceConfig({ sdr: { newCardsPerDay: 99 }, rep: { firstContactBusinessDays: 0 } });
-    expect(cfg.newCardsPerDay).toBe(10);
+    const cfg = normalizeCadenceConfig({ rep: { firstContactBusinessDays: 0 } });
     expect(cfg.repFirstContactBusinessDays).toBe(1);
   });
 

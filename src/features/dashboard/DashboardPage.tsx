@@ -23,12 +23,22 @@ import { useUIStore } from '../../stores/uiStore';
 import { matchesProductId } from '../../utils/productScope';
 import { BrazilMapSVG } from '../../components/ui/BrazilMapSVG';
 import { LeadFunnelWidget } from './LeadFunnelWidget';
+import { AgendaOriginPanel } from './AgendaOriginPanel';
+import {
+  indexDealsById,
+  breakdownDeals,
+  breakdownMeetings,
+  breakdownLabel,
+  agendaRowsFromDeals,
+  agendaRowsFromMeetings,
+} from '../../utils/originBreakdown';
 import { classifyDueActivities } from '../../utils/cadenceUtils';
 import { getLostReasonLabel } from '../../utils/lostReasonUtils';
 import { isCardExpired, getLastActivityAt } from '../../utils/cardExpirationUtils';
 import { dealParticipantConstraint } from '../../utils/dealQueryScope';
 import { getSdrWorkload } from '../../utils/sdrWorkload';
 import { AssignSdrModal } from '../pipeline/AssignSdrModal';
+import { useLeaderboard } from '../../hooks/useLeaderboard';
 
 // ── Período ───────────────────────────────────────────────────────────────────
 type Period = 'today' | 'week' | 'month';
@@ -67,7 +77,9 @@ function PainelGestao() {
   const todayLabel   = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
 
   const [period, setPeriod]           = useState<Period>('month');
-  const [showVisitMap, setShowVisitMap] = useState(false);
+  // Slide 2: clicar no indicador abre o detalhe. Um painel por vez — abrir
+  // reuniões fecha visitas e vice-versa, para não empilhar dois painéis.
+  const [openPanel, setOpenPanel] = useState<null | 'meetings' | 'visits'>(null);
   const [productFilter, setProductFilter] = useState<'all' | 'wizmart' | 'smart_cafe'>('all');
 
   const { data: deals }      = useFirestoreCollection<Deal>('deals');
@@ -104,7 +116,8 @@ function PainelGestao() {
   }).length;
 
   // ── KPI 3 — Reuniões Agendadas ─────────────────────────────────────────────
-  const meetingsScheduled = scopedActs.filter(a => a.type === 'meeting').length;
+  const meetingActs = scopedActs.filter(a => a.type === 'meeting');
+  const meetingsScheduled = meetingActs.length;
 
   // ── KPI 4 — Visitas Agendadas ──────────────────────────────────────────────
   // WizMart: visita_agendada | Smart Café: degustacao_agendada / degustacao_realizada
@@ -115,6 +128,20 @@ function PainelGestao() {
     const uf = (d as any).uf ?? d.location?.state ?? 'N/D';
     if (uf && uf !== 'N/D') visitsByState[uf] = (visitsByState[uf] ?? 0) + 1;
   });
+
+  // ── Quebra por origem (Fase 4 — slide 2) ───────────────────────────────────
+  // Visita sai do deal (que tem `origin`); reunião sai da atividade e resolve a
+  // origem pelo `dealId`. O índice é montado sobre TODOS os deals, não só os do
+  // escopo: uma reunião pode apontar para um deal de outro produto, e é melhor
+  // classificá-la certo do que jogá-la em "sem origem".
+  const nameOfUser = (uid: string | undefined) =>
+    (uid ? users.find((u: any) => u.id === uid || u.uid === uid)?.name ?? '' : '');
+  const allDealsById = indexDealsById(deals);
+
+  const visitsBreakdown   = breakdownDeals(visitDeals);
+  const meetingsBreakdown = breakdownMeetings(meetingActs, allDealsById);
+  const visitRows   = agendaRowsFromDeals(visitDeals, nameOfUser);
+  const meetingRows = agendaRowsFromMeetings(meetingActs, allDealsById, nameOfUser);
 
   // ── KPI 5 — Conquistas por produto ────────────────────────────────────────
   // WizMart: inaugurado | Smart Café: instalacao_realizada
@@ -169,6 +196,8 @@ function PainelGestao() {
     { id: 'lista_potencial',       label: 'Lista Potencial'       },
     { id: 'prospeccao',            label: 'Prospecção'            },
     { id: 'conectado',             label: 'Conectado'             },
+    { id: 'reuniao_agendada',      label: 'Reunião Ag.'           },
+    { id: 'reuniao_realizada',     label: 'Reunião Real.'         },
     { id: 'visita_agendada',       label: 'Visita Ag.'            },
     { id: 'visita_realizada',      label: 'Visita Real.'          },
     { id: 'degustacao_agendada',   label: 'Degust. Ag.'           },
@@ -273,8 +302,12 @@ function PainelGestao() {
           <ActivityGoalBar actual={todayActs} goal={totalGoal} />
         </div>
 
-        {/* 3 — Reuniões Agendadas */}
-        <div className="card card-pad kpi-dir-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 3 — Reuniões Agendadas — hover mostra a origem, clique abre o detalhe (slide 2) */}
+        <div
+          className="card card-pad kpi-dir-card"
+          style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+          title={`${meetingsScheduled} Reuniões — ${breakdownLabel(meetingsBreakdown)}`}
+        >
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span className="label">Reuniões Agendadas</span>
             <div style={{ width: 34, height: 34, borderRadius: 8, background: '#EDE9FE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -282,11 +315,24 @@ function PainelGestao() {
             </div>
           </div>
           <div style={{ fontSize: 32, fontWeight: 800, color: '#7C3AED', fontVariantNumeric: 'tabular-nums' }}>{meetingsScheduled}</div>
-          <div className="muted" style={{ fontSize: 12 }}>no período selecionado</div>
+          <div className="muted" style={{ fontSize: 12 }}>{breakdownLabel(meetingsBreakdown)}</div>
+          <button
+            className="tlink"
+            style={{ fontSize: 12, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 4 }}
+            onClick={() => setOpenPanel(p => p === 'meetings' ? null : 'meetings')}
+            aria-expanded={openPanel === 'meetings'}
+          >
+            <Icon name={openPanel === 'meetings' ? 'ChevronUp' : 'List'} size={13} />
+            {openPanel === 'meetings' ? 'Fechar detalhes' : 'Ver detalhes'}
+          </button>
         </div>
 
-        {/* 4 — Visitas Agendadas */}
-        <div className="card card-pad kpi-dir-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 4 — Visitas Agendadas — hover mostra a origem, clique abre mapa + detalhe */}
+        <div
+          className="card card-pad kpi-dir-card"
+          style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+          title={`${visitDeals.length} Visitas — ${breakdownLabel(visitsBreakdown)}`}
+        >
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span className="label">Visitas Agendadas</span>
             <div style={{ width: 34, height: 34, borderRadius: 8, background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -294,13 +340,15 @@ function PainelGestao() {
             </div>
           </div>
           <div style={{ fontSize: 32, fontWeight: 800, color: '#B91C1C', fontVariantNumeric: 'tabular-nums' }}>{visitDeals.length}</div>
+          <div className="muted" style={{ fontSize: 12 }}>{breakdownLabel(visitsBreakdown)}</div>
           <button
             className="tlink"
             style={{ fontSize: 12, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 4 }}
-            onClick={() => setShowVisitMap(v => !v)}
+            onClick={() => setOpenPanel(p => p === 'visits' ? null : 'visits')}
+            aria-expanded={openPanel === 'visits'}
           >
-            <Icon name={showVisitMap ? 'ChevronUp' : 'Map'} size={13} />
-            {showVisitMap ? 'Fechar mapa' : 'Ver por estado'}
+            <Icon name={openPanel === 'visits' ? 'ChevronUp' : 'Map'} size={13} />
+            {openPanel === 'visits' ? 'Fechar mapa' : 'Ver por estado'}
           </button>
         </div>
 
@@ -341,42 +389,28 @@ function PainelGestao() {
         </div>
       </div>
 
-      {/* Painel de Mapa de Visitas (expansível) */}
-      {showVisitMap && (
-        <div className="card kpi-dir-card" style={{ animation: 'fadeIn .25s ease' }}>
-          <div className="card-hd">
-            <h3>Mapa de Visitas por Estado</h3>
-            <div className="row" style={{ gap: 8 }}>
-              <span className="badge badge-gray">{visitDeals.length} visita{visitDeals.length !== 1 ? 's' : ''}</span>
-              <button className="icon-btn" onClick={() => setShowVisitMap(false)}><Icon name="X" size={15} /></button>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-            {/* Mapa SVG do Brasil */}
-            <div style={{ padding: '8px 16px' }}>
-              <BrazilMapSVG visitsByState={visitsByState} height={280} />
-            </div>
-            {/* Lista de visitas */}
-            <div style={{ borderLeft: '1px solid var(--border)', maxHeight: 300, overflowY: 'auto' }}>
-              {visitDeals.length === 0 ? (
-                <div className="muted" style={{ padding: 20, fontSize: 13 }}>Nenhuma visita no período</div>
-              ) : visitDeals.map((d, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', borderBottom: '1px solid var(--border)' }}>
-                  <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 11, fontWeight: 700, color: '#B91C1C' }}>
-                    {d.location?.state ?? 'N/D'}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.company}</div>
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      {d.location?.city ?? '—'}
-                      {d.visitPopulation ? ` · ${d.visitPopulation.toLocaleString('pt-BR')} colaboradores` : ''}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+      {/* Painéis de detalhe (slide 2) — mesmo componente para reunião e visita.
+          A visita ganha o mapa do Brasil como `aside`; a reunião não tem mapa
+          porque a atividade não carrega UF própria (vem do deal, quando existe). */}
+      {openPanel === 'visits' && (
+        <AgendaOriginPanel
+          title="Visitas Agendadas — por estado e origem"
+          rows={visitRows}
+          breakdown={visitsBreakdown}
+          onClose={() => setOpenPanel(null)}
+          emptyLabel="Nenhuma visita no período"
+          aside={<BrazilMapSVG visitsByState={visitsByState} height={280} />}
+        />
+      )}
+
+      {openPanel === 'meetings' && (
+        <AgendaOriginPanel
+          title="Reuniões Agendadas — por origem"
+          rows={meetingRows}
+          breakdown={meetingsBreakdown}
+          onClose={() => setOpenPanel(null)}
+          emptyLabel="Nenhuma reunião no período"
+        />
       )}
 
       {/* Funil de leads: atribuídos → visitas → fechamento → contrato */}
@@ -551,7 +585,8 @@ function PainelSDR() {
   const { user }  = useAuthStore();
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
-  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
+  const canManageDeals = usePermissions().hasPermission('manage_deal_cards');
+  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user, canManageDeals));
   const { data: sdrActivities } = useFirestoreCollection<Activity>('activities');
   const agendaAlerts = user?.uid ? classifyDueActivities(sdrActivities as any, user.uid) : { overdue: 0, dueToday: 0 };
 
@@ -564,6 +599,30 @@ function PainelSDR() {
 
   // Cards vencidos: 21 dias sem atividade concluída (Observações do cliente, jul/2026)
   const expiredCount = myDeals.filter(d => isCardExpired(d, getLastActivityAt(sdrActivities as any, d.id))).length;
+
+  // ── Fechamento do dia (Fase 4 do PLANO_DESENHO_CRM.md — slide 10) ──────────
+  //
+  // Slide 10 pede que o SDR feche o dia vendo, além do próprio progresso, a
+  // quantidade de reuniões e visitas agendadas e a sua posição no time.
+  //
+  // Uma restrição importante: um SDR só lê os deals em que participa (as rules
+  // restringem — `canSeeAllDeals` não inclui sdr). Então o TOTAL DO TIME de
+  // visitas não é calculável aqui, e não é inventado: o bloco mostra as MINHAS
+  // visitas e reuniões (com a quebra por origem) e a minha posição relativa vem
+  // do leaderboard, que é agregado no RTDB e legível por todos.
+  const myMeetingActs = (sdrActivities as any[]).filter(
+    a => a.type === 'meeting' && a.userId === user?.uid,
+  );
+  const myDealsById = indexDealsById(myDeals);
+  const myMeetingsBreakdown = breakdownMeetings(myMeetingActs as any, myDealsById);
+
+  const SDR_VISIT_STAGES = new Set(['visita_agendada', 'degustacao_agendada', 'degustacao_realizada']);
+  const myVisitDeals = myDeals.filter(d => SDR_VISIT_STAGES.has(d.stage));
+  const myVisitsBreakdown = breakdownDeals(myVisitDeals);
+
+  const { data: ranking } = useLeaderboard();
+  const myRankIndex = ranking.findIndex(r => r.id === user?.uid);
+  const myRank = myRankIndex >= 0 ? ranking[myRankIndex] : null;
 
   useEffect(() => {
     // Ver comentário equivalente em PainelGestao: pular em aba oculta evita
@@ -650,6 +709,52 @@ function PainelSDR() {
         </div>
       </div>
 
+      {/* Fechamento do Dia (slide 10): reuniões e visitas com origem + posição no time */}
+      <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h3 style={{ margin: 0 }}>Fechamento do Dia</h3>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/leaderboard')}>
+            <Icon name="Trophy" size={14} />Ver ranking do time
+          </button>
+        </div>
+
+        <div className="grid-cols-4-responsive">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span className="label">Minhas Reuniões Agendadas</span>
+            <div style={{ fontSize: 26, fontWeight: 800, color: '#7C3AED', fontVariantNumeric: 'tabular-nums' }}>
+              {myMeetingsBreakdown.total}
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>{breakdownLabel(myMeetingsBreakdown)}</div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span className="label">Minhas Visitas Agendadas</span>
+            <div style={{ fontSize: 26, fontWeight: 800, color: '#B91C1C', fontVariantNumeric: 'tabular-nums' }}>
+              {myVisitsBreakdown.total}
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>{breakdownLabel(myVisitsBreakdown)}</div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span className="label">Minha Posição no Time</span>
+            <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
+              {myRank ? `${myRank.rank}º` : '—'}
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {myRank ? `de ${ranking.length} · ${myRank.pts} pts` : 'ranking ainda não calculado'}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span className="label">Atividades Concluídas</span>
+            <div style={{ fontSize: 26, fontWeight: 800, color: pct >= 75 ? 'var(--primary)' : pct >= 50 ? '#F59E0B' : '#EF4444', fontVariantNumeric: 'tabular-nums' }}>
+              {doneActs}<span style={{ fontSize: 15, fontWeight: 500, color: 'var(--text-2)' }}>/{totalActs}</span>
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>{pct}% do dia</div>
+          </div>
+        </div>
+      </div>
+
       {/* Funil dos meus leads (atribuídos → visitas → fechamento → contrato) */}
       <LeadFunnelWidget deals={myDeals} title="Funil dos Meus Leads" />
 
@@ -659,7 +764,7 @@ function PainelSDR() {
           <button className="btn btn-primary btn-sm" onClick={() => navigate('/cadencia')}><Icon name="ArrowRight" size={14} />Ver completo</button>
         </div>
         {myDeals.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '30px 0' }} className="muted">Nenhum card atribuído. O motor de cadência distribuirá seus cards às 7h.</div>
+          <div style={{ textAlign: 'center', padding: '30px 0' }} className="muted">Nenhum card atribuído. Os cards chegam quando o BDR ou a gestão atribuir leads a você.</div>
         ) : (
           myDeals.slice(0, 3).map(d => {
             const done = (d.tasks?.e ? 1 : 0) + (d.tasks?.w ? 1 : 0) + (d.tasks?.m ? 1 : 0);
@@ -693,7 +798,8 @@ function PainelRep() {
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
   const { data: handoffs } = useFirestoreCollection<Handoff>('handoffs');
-  const { data: deals }    = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
+  const canManageDeals = usePermissions().hasPermission('manage_deal_cards');
+  const { data: deals }    = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user, canManageDeals));
 
   const pending    = handoffs.filter(h => h.toRepId === user?.uid && h.status === 'pending_rep_acceptance' && matchesProductId(productScope, h.productId || 'wizmart'));
   const myDeals    = deals.filter(d => d.assignedRepId === user?.uid && d.status === 'open' && matchesProductId(productScope, d.productId || 'wizmart'));
@@ -783,7 +889,8 @@ function PainelBDR() {
   // trabalham leads de outros BDRs. Fix correto é mover esse agregado pra uma
   // Cloud Function (Admin SDK, ignora rules) — planejado na Fase D2/D3 do
   // plano (getSdrWorkload() vira callable, não util client-side).
-  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
+  const canManageDeals = usePermissions().hasPermission('manage_deal_cards');
+  const { data: deals } = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user, canManageDeals));
   const { data: users } = useFirestoreCollection<any>('users');
   const { data: activities } = useFirestoreCollection<any>('activities');
   const { updateDocument: updateDeal } = useFirestoreMutations('deals');
@@ -793,9 +900,8 @@ function PainelBDR() {
   const inQueue = myLeads.filter(d => d.status === 'in_queue');
   const active  = myLeads.filter(d => d.status === 'open');
 
-  // Atribuição manual BDR→SDR (Fase D2) — convive com a distribuição automática
-  // do dailyCadenceEngine; não substitui a fila, é uma via extra pra reagir na
-  // hora (ex.: um SDR zerou a cadência e está disponível pra mais cards).
+  // Atribuição manual BDR→SDR (Fase D2) — única via de distribuição: o
+  // dailyCadenceEngine não atribui mais leads da fila automaticamente.
   const [assigningDeal, setAssigningDeal] = useState<Deal | null>(null);
   const handleAssignSdr = async (data: { sdrId: string; notes?: string }) => {
     if (!assigningDeal) return;
@@ -911,7 +1017,7 @@ function PainelBDR() {
       {/* Funil dos leads gerados por mim */}
       <LeadFunnelWidget deals={myLeads} title="Funil dos Meus Leads" />
 
-      {/* Atribuição manual BDR→SDR — via extra além da distribuição automática */}
+      {/* Atribuição manual BDR→SDR — única via de distribuição */}
       {inQueue.length > 0 && (
         <div className="card card-pad kpi-card-anim" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -921,7 +1027,7 @@ function PainelBDR() {
             </span>
           </div>
           <p className="muted" style={{ fontSize: 12, marginTop: -6 }}>
-            O motor de cadência distribui automaticamente às 7h — atribua direto se já souber pra quem deve ir.
+            Não há distribuição automática: atribua cada lead a um SDR para iniciar a cadência.
           </p>
           {inQueue.map(d => (
             <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>

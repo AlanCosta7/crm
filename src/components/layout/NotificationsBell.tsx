@@ -57,7 +57,12 @@ export function NotificationsBell() {
   const handleClick = (n: AppNotification) => {
     markRead(n);
     setOpen(false);
-    if (n.dealId) navigate('/pipeline');
+    // Aviso com rota própria (ex.: pedido novo leva o Design à fila).
+    if (n.link) { navigate(n.link); return; }
+    if (!n.dealId) return;
+    // Menção em nota abre o card direto — o feed do pipeline não mostraria a
+    // nota que motivou o aviso.
+    navigate(n.type === 'note_mention' || n.type === 'project_delivered' ? `/lead/${n.dealId}` : '/pipeline');
   };
 
   const markAllRead = () => {
@@ -129,7 +134,12 @@ export function NotificationsBell() {
               >
                 <span style={{ marginTop: 2 }}>
                   <Icon
-                    name={n.type === 'lead_received' ? 'Inbox' : 'Info'}
+                    name={
+                      n.type === 'lead_received' ? 'Inbox'
+                      : n.type === 'note_mention' ? 'AtSign'
+                      : n.type === 'project_requested' || n.type === 'project_delivered' ? 'PenLine'
+                      : 'Info'
+                    }
                     size={16}
                     color={n.read ? '#9aa3af' : 'var(--primary)'}
                   />

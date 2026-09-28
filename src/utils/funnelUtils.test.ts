@@ -18,6 +18,11 @@ import {
   canMoveDeal,
   canConfirmHandoff,
   applyTemplate,
+  pipelineBoards,
+  dealBelongsToBoard,
+  dealOrigin,
+  filterDealsByOrigin,
+  countByOrigin,
 } from './funnelUtils';
 import type { Funnel, FunnelStage, Deal, UserRole } from '../types/crm';
 
@@ -308,5 +313,135 @@ describe('applyTemplate', () => {
   });
   it('texto vazio retorna vazio', () => {
     expect(applyTemplate('', { contactFirstName: 'X' })).toBe('');
+  });
+});
+
+// ── Fase 1.3 do PLANO_DESENHO_CRM.md — visão única por produto ────────────────
+
+describe('pipelineBoards', () => {
+  const semFiltro = () => true;
+
+  const mainWiz: Funnel = {
+    id: 'wizmart', name: 'WizMart', type: 'main', productId: 'wizmart',
+    color: '#1A6B1A', isActive: true, stages: [],
+  } as Funnel;
+  const mainCafe: Funnel = {
+    id: 'smart_cafe', name: 'Smart Café', type: 'main', productId: 'smart_cafe',
+    color: '#5E3A26', isActive: true, stages: [],
+  } as Funnel;
+  const legacyInbound: Funnel = {
+    id: 'inbound-wiz', name: 'Inbound — WizMart', type: 'inbound', productId: 'wizmart',
+    color: '#1A6B1A', isActive: true, stages: [],
+  } as Funnel;
+  const legacyOutbound: Funnel = {
+    id: 'outbound-wiz', name: 'Outbound — WizMart', type: 'outbound', productId: 'wizmart',
+    color: '#1A6B1A', isActive: true, stages: [],
+  } as Funnel;
+  const legacyBdr: Funnel = {
+    id: 'bdr-outbound', name: 'BDR - Outbound', type: 'outbound', productId: 'wizmart',
+    color: '#1A6B1A', isActive: true, stages: [],
+  } as Funnel;
+
+  // O caso do print do deck: 4 abas para o mesmo produto viram 1.
+  it('colapsa os 4 funis do WizMart num único board', () => {
+    const boards = pipelineBoards(
+      [legacyBdr, legacyInbound, legacyOutbound, mainWiz], 'master', semFiltro,
+    );
+    expect(boards).toHaveLength(1);
+    expect(boards[0].id).toBe('wizmart');
+  });
+
+  it('mantém um board por produto quando os dois têm funil unificado', () => {
+    const boards = pipelineBoards([mainWiz, mainCafe, legacyInbound], 'master', semFiltro);
+    expect(boards.map(b => b.id)).toEqual(['smart_cafe', 'wizmart'].sort());
+  });
+
+  it('sem funil unificado, cai nos legados para o pipe não ficar vazio', () => {
+    const boards = pipelineBoards([legacyInbound, legacyOutbound], 'master', semFiltro);
+    expect(boards).toHaveLength(2);
+  });
+
+  it('funil unificado de um produto não esconde os legados de OUTRO produto', () => {
+    const legacyCafe = { ...legacyInbound, id: 'inbound-cafe', productId: 'smart_cafe' } as Funnel;
+    const boards = pipelineBoards([mainWiz, legacyInbound, legacyCafe], 'master', semFiltro);
+    expect(boards.map(b => b.id)).toEqual(['wizmart', 'inbound-cafe']);
+  });
+
+  it('ignora funis inativos', () => {
+    const boards = pipelineBoards([{ ...mainWiz, isActive: false } as Funnel], 'master', semFiltro);
+    expect(boards).toHaveLength(0);
+  });
+
+  it('respeita o filtro de produto do topbar', () => {
+    const soCafe = (p?: string) => p === 'smart_cafe';
+    const boards = pipelineBoards([mainWiz, mainCafe], 'master', soCafe);
+    expect(boards.map(b => b.id)).toEqual(['smart_cafe']);
+  });
+
+  it('respeita os tipos visíveis por papel — rep não vê inbound/outbound', () => {
+    const boards = pipelineBoards([legacyInbound, legacyOutbound], 'rep', semFiltro);
+    expect(boards).toHaveLength(0);
+  });
+});
+
+describe('dealBelongsToBoard', () => {
+  const mainWiz = { id: 'wizmart', type: 'main', productId: 'wizmart' } as Funnel;
+  const legacyInbound = { id: 'inbound-wiz', type: 'inbound', productId: 'wizmart' } as Funnel;
+
+  // O ponto central da migração: deal preso em funil legado aparece no board
+  // único sem precisar reescrever o documento antes.
+  it('board unificado casa por produto, mesmo com funnelId legado', () => {
+    const deal = { id: 'd1', productId: 'wizmart', funnelId: 'inbound-wiz' } as Deal;
+    expect(dealBelongsToBoard(deal, mainWiz)).toBe(true);
+  });
+
+  it('board unificado não pega deal de outro produto', () => {
+    const deal = { id: 'd1', productId: 'smart_cafe', funnelId: 'x' } as Deal;
+    expect(dealBelongsToBoard(deal, mainWiz)).toBe(false);
+  });
+
+  it('deal sem productId é tratado como wizmart', () => {
+    const deal = { id: 'd1' } as Deal;
+    expect(dealBelongsToBoard(deal, mainWiz)).toBe(true);
+  });
+
+  it('board legado continua casando por funnelId', () => {
+    expect(dealBelongsToBoard({ id: 'd1', productId: 'wizmart', funnelId: 'inbound-wiz' } as Deal, legacyInbound)).toBe(true);
+    expect(dealBelongsToBoard({ id: 'd2', productId: 'wizmart', funnelId: 'outbound-wiz' } as Deal, legacyInbound)).toBe(false);
+  });
+
+  it('sem board definido, não filtra nada', () => {
+    expect(dealBelongsToBoard({ id: 'd1' } as Deal, undefined)).toBe(true);
+  });
+});
+
+describe('origem do deal', () => {
+  const inbound = { id: 'a', origin: 'inbound' } as Deal;
+  const outbound = { id: 'b', origin: 'outbound' } as Deal;
+  const legado = { id: 'c' } as Deal; // antes do backfill
+
+  it('deal sem origin é lido como outbound (mesmo default do servidor)', () => {
+    expect(dealOrigin(legado)).toBe('outbound');
+  });
+
+  it('filtro all não mexe na lista', () => {
+    expect(filterDealsByOrigin([inbound, outbound, legado], 'all')).toHaveLength(3);
+  });
+
+  it('filtra inbound', () => {
+    expect(filterDealsByOrigin([inbound, outbound, legado], 'inbound')).toEqual([inbound]);
+  });
+
+  it('filtra outbound e inclui os deals ainda sem origin', () => {
+    expect(filterDealsByOrigin([inbound, outbound, legado], 'outbound')).toEqual([outbound, legado]);
+  });
+
+  // É a quebra que o slide 2 pede no hover: "3 Reuniões — 0 Inbound / 3 Outbound"
+  it('countByOrigin produz a quebra do slide 2', () => {
+    expect(countByOrigin([inbound, outbound, legado])).toEqual({ inbound: 1, outbound: 2, total: 3 });
+  });
+
+  it('countByOrigin com lista vazia', () => {
+    expect(countByOrigin([])).toEqual({ inbound: 0, outbound: 0, total: 0 });
   });
 });

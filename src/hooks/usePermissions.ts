@@ -1,10 +1,12 @@
 import { useAuthStore } from '../stores/authStore';
 import { useFirestoreCollection } from './useFirestore';
+import { effectivePermissions } from '../utils/rolePermissions';
 
 export interface RoleDoc {
   id: string;
   name: string;
   permissions: string[];
+  permissionsRev?: number;
 }
 
 export function usePermissions() {
@@ -17,89 +19,9 @@ export function usePermissions() {
   // Encontra o documento de perfil correspondente
   const activeRoleDoc = roles.find(r => r.id === userRole);
 
-  // Permissões padrão do sistema para fallback (compatibilidade e primeira inicialização)
-  const getDefaultPermissions = (role: string): string[] => {
-    if (role === 'master') {
-      return [
-        'view_dashboard',
-        'view_pipeline',
-        'view_contacts',
-        'view_companies',
-        'view_cadence',
-        'view_activities',
-        'view_handoffs',
-        'view_tasks',
-        'view_leaderboard',
-        'view_carteira',
-        'view_loja',
-        'view_kpi_reports',
-        'view_admin_settings',
-        'view_management_dashboard',
-      ];
-    }
-    if (role === 'manager') {
-      return [
-        'view_dashboard',
-        'view_pipeline',
-        'view_contacts',
-        'view_companies',
-        'view_activities',
-        'view_tasks',
-        'view_leaderboard',
-        'view_carteira',
-        'view_loja',
-        'view_kpi_reports',
-        'view_management_dashboard',
-      ];
-    }
-    if (role === 'sdr') {
-      return [
-        'view_dashboard',
-        'view_pipeline',
-        'view_contacts',
-        'view_cadence',
-        'view_activities',
-        'view_leaderboard',
-        'view_carteira',
-        'view_loja',
-        'view_sdr_dashboard',
-      ];
-    }
-    if (role === 'rep') {
-      return [
-        'view_dashboard',
-        'view_pipeline',
-        'view_contacts',
-        'view_handoffs',
-        'view_leaderboard',
-        'view_carteira',
-        'view_loja',
-        'view_rep_dashboard',
-      ];
-    }
-    if (role === 'bdr') {
-      return [
-        'view_dashboard',
-        'view_pipeline',
-        'view_contacts',
-        'view_leaderboard',
-        'view_carteira',
-        'view_loja',
-        'view_bdr_dashboard',
-      ];
-    }
-    // viewer / padrão
-    return [
-      'view_dashboard',
-      'view_pipeline',
-      'view_contacts',
-      'view_companies',
-      'view_kpi_reports',
-      'view_viewer_dashboard',
-    ];
-  };
-
-  const permissions = activeRoleDoc ? activeRoleDoc.permissions : getDefaultPermissions(userRole);
+  // Padrão do código quando o perfil não tem documento; com documento, o salvo
+  // (+ rollouts mais novos que ele) — ver utils/rolePermissions.ts.
+  const permissions = effectivePermissions(userRole, activeRoleDoc);
 
   const hasPermission = (perm: string) => {
     // Admin Master sempre tem acesso total a tudo por segurança
@@ -117,6 +39,7 @@ export function usePermissions() {
       sdr: 'SDR',
       rep: 'Representante',
       viewer: 'Visualizador',
+      financeiro: 'Financeiro',
     };
     return defaultLabels[roleId] || roleId;
   };

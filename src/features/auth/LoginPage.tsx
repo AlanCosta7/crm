@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { POST_LOGIN_FLAG } from './PostLoginLanding';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../../config/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, functions } from '../../config/firebase';
 import { Logo } from '../../components/ui/Logo';
 import { Icon } from '../../components/ui/Icon';
 
-// Usuários de teste seedados via `npm run emulators:seed` (scripts/seed-emulators.mjs).
+// Usuários de teste seedados via `npm run emulators:seed` (scripts/seed/seed-emulators.mjs).
 // Disponíveis apenas em ambiente de desenvolvimento (emulador), nunca em produção.
 const QUICK_LOGIN_USERS = [
   { email: 'master@wizmart.com.br', label: 'Ricardo', role: 'Master', icon: 'Crown', color: '#1A6B1A' },
@@ -15,6 +17,7 @@ const QUICK_LOGIN_USERS = [
   { email: 'rep@wizmart.com.br', label: 'Carla', role: 'Rep', icon: 'Handshake', color: '#B91C1C' },
   { email: 'design@wizmart.com.br', label: 'Fernanda D.', role: 'Design', icon: 'Palette', color: '#7C3AED' },
   { email: 'viewer@wizmart.com.br', label: 'Paulo', role: 'Viewer', icon: 'Eye', color: '#4B5563' },
+  { email: 'financeiro@wizmart.com.br', label: 'Fátima', role: 'Financeiro', icon: 'Banknote', color: '#5E3A26' },
 ];
 const QUICK_LOGIN_PASSWORD = 'senha_de_teste_123';
 
@@ -31,6 +34,35 @@ export function LoginPage() {
   // Rota para redirecionamento após o login correto
   const from = location.state?.from?.pathname || '/';
 
+  /**
+   * Marca que esta navegação veio do login, para o `PostLoginLanding` poder
+   * levar o SDR direto à fila do dia (slide 9 do deck). Só quando não há
+   * destino específico: se o usuário tentou abrir uma rota e foi barrado, ele
+   * volta para ela, não para a página inicial do papel.
+   */
+  const marcarPousoPosLogin = () => {
+    if (from !== '/') return;
+    try {
+      sessionStorage.setItem(POST_LOGIN_FLAG, '1');
+    } catch {
+      // Storage bloqueado — cai no Dashboard, comportamento antigo.
+    }
+  };
+  // Voltando do fallback de "Visualizar como" sem bilhete válido — a sessão de
+  // teste já foi encerrada no servidor (endImpersonation), só falta logar de
+  // novo como Master.
+  const infoMessage = location.state?.impersonationEnded
+    ? 'Sessão de teste encerrada. Faça login novamente como Master.'
+    : '';
+
+  // Best-effort: a auditoria de sessão (Fase 6.1) nunca deve barrar o login em
+  // si — se a callable falhar, o usuário entra normalmente, só sem o registro.
+  const registrarLogin = () => {
+    httpsCallable(functions, 'logSessionEvent')({ event: 'login' }).catch((err) => {
+      console.warn('Não foi possível registrar o login na auditoria:', err);
+    });
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -38,6 +70,8 @@ export function LoginPage() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      marcarPousoPosLogin();
+      registrarLogin();
       navigate(from, { replace: true });
     } catch (err: any) {
       console.error('Login error:', err);
@@ -52,6 +86,8 @@ export function LoginPage() {
     setQuickLoginEmail(quickEmail);
     try {
       await signInWithEmailAndPassword(auth, quickEmail, QUICK_LOGIN_PASSWORD);
+      marcarPousoPosLogin();
+      registrarLogin();
       navigate(from, { replace: true });
     } catch (err: any) {
       console.error('Quick login error:', err);
@@ -145,6 +181,23 @@ export function LoginPage() {
           >
             <Icon name="AlertTriangle" size={16} />
             <span style={{ fontSize: 12, fontWeight: 500 }}>{error}</span>
+          </div>
+        )}
+
+        {!error && infoMessage && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 'var(--r-input)',
+              background: 'var(--primary-light)',
+              color: 'var(--primary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <Icon name="Info" size={16} />
+            <span style={{ fontSize: 12, fontWeight: 500 }}>{infoMessage}</span>
           </div>
         )}
 

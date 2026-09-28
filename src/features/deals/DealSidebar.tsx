@@ -10,7 +10,7 @@
  *  - "Ganhar" move para 'inaugurado' (WizMart) ou 'instalacao_realizada' (Smart Café)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import anime from 'animejs';
 import { useFirestoreCollection, useFirestoreMutations } from '../../hooks/useFirestore';
@@ -25,6 +25,7 @@ import { Icon } from '../../components/ui/Icon';
 import { Av } from '../../components/ui/Av';
 import { fmtCurrency, sellerById } from '../../utils/crmFormat';
 import { ProjectRequestModal } from '../projetos/ProjectRequestModal';
+import { canRequestProject } from '../projetos/projectAccess';
 import { EmailActionModal } from './actions/EmailActionModal';
 import { WhatsAppActionModal } from './actions/WhatsAppActionModal';
 import { MeetingActionModal } from './actions/MeetingActionModal';
@@ -37,6 +38,19 @@ import { dealParticipantConstraint } from '../../utils/dealQueryScope';
 import { COMPANY_SIZE_LABEL, COMPANY_SIZE_COLOR, effectiveCompanySize, type CompanySizeEstimate } from '../../utils/companySize';
 import { getSdrWorkload } from '../../utils/sdrWorkload';
 import { AssignSdrModal } from '../pipeline/AssignSdrModal';
+import { ChangeResponsibleModal } from './ChangeResponsibleModal';
+import { usePermissions } from '../../hooks/usePermissions';
+import { mergePeople } from '../../utils/people';
+import { computeResponsibleId } from '../../utils/dealParticipants';
+import { buildResponsibleChange, eligibleResponsibles, RESPONSIBLE_FIELD_LABEL } from '../../utils/dealResponsible';
+import { ContractSlot } from './ContractSlot';
+import { splitDealActivities } from './dealActivities';
+import { projectTimelineSteps } from './dealTimeline';
+import { useDealTimeline } from './useDealTimeline';
+import { ContactSelector, type NewContactInput } from './ContactSelector';
+// Aba Notas em lazy: só quem abre a aba baixa a pilha de markdown (chunk
+// 'markdown' no vite.config.ts).
+const NotesTab = lazy(() => import('./notes/NotesTab').then(m => ({ default: m.NotesTab })));
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
@@ -111,9 +125,11 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
 
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const timelineEvents = useDealTimeline(dealId);
+  const { hasPermission } = usePermissions();
 
-  const { data: deals }   = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user));
-  const { data: sellers } = useFirestoreCollection<Seller>('sellers');
+  const { data: deals }   = useFirestoreCollection<Deal>('deals', dealParticipantConstraint(user, hasPermission('manage_deal_cards')));
+  const { data: legacySellers } = useFirestoreCollection<Seller>('sellers');
   const { data: stages }  = useFirestoreCollection<Stage>('stages');
   const { data: contacts } = useFirestoreCollection<Contact>('contacts');
   const { data: activities } = useFirestoreCollection<Activity>('activities');
@@ -122,14 +138,13 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
   // SDRs ativos + carga atual — só usado pro botão "Atribuir SDR" (Fase D2/D3),
   // mas o hook precisa rodar sempre (Rules of Hooks).
   const { data: allUsers } = useFirestoreCollection<any>('users');
+  // Nomes/avatares: `users` primeiro (todo convidado só existe lá), `sellers` legado como reserva.
+  const sellers = useMemo(() => mergePeople(allUsers, legacySellers), [allUsers, legacySellers]);
   const { updateDocument } = useFirestoreMutations('deals');
   const { addDocument: addActivity, updateDocument: updateActivity } = useFirestoreMutations('activities');
+  const { addDocument: addContact } = useFirestoreMutations('contacts');
 
   const deal = deals.find(d => d.id === dealId);
-
-  // ── Estado notas ──────────────────────────────────────────────────────────
-  const [noteText, setNoteText] = useState('');
-  const [savingNote, setSavingNote] = useState(false);
 
   // Modal de ação ativo (email / whatsapp / reunião)
   const [actionModal, setActionModal] = useState<'email' | 'whatsapp' | 'meeting' | null>(null);
@@ -167,6 +182,9 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
   // ── Estado atribuição manual de SDR (Fase D2) ─────────────────────────────
   const [showAssignSdrModal, setShowAssignSdrModal] = useState(false);
 
+  // ── Estado troca de responsável (autorização manage_deal_cards) ───────────
+  const [showChangeResponsibleModal, setShowChangeResponsibleModal] = useState(false);
+
   useEffect(() => {
     if (deal) setSelectedAdditional(deal.additionalProducts ?? []);
   }, [deal]);
@@ -190,7 +208,9 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
   const cardExpired = isCardExpired(deal, lastActivityAt);
   const daysInactive = daysSinceLastActivity(deal, lastActivityAt);
 
-  const s  = sellerById(sellers, deal.assignedRepId || deal.assignedSdrId || deal.owner);
+  // Mesma cadeia da CF onDealParticipantsChanged (rep > sdr > bdr > dono) — antes
+  // pulava o BDR, o que mostrava o dono errado depois de uma troca de responsável.
+  const s  = sellerById(sellers, deal.responsibleId || computeResponsibleId(deal));
   // fallback estágio: usa deal.stage como nome se não encontrado em legado
   const stageName = (stages.find(st => st.id === deal.stage)?.name) ?? deal.stage ?? '—';
   const prodColor = deal.productId === 'smart_cafe' ? '#5E3A26' : '#1A6B1A';
@@ -303,6 +323,34 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
   // PainelBDR/DashboardPage.tsx: carga pode ficar subestimada pra SDRs que
   // também trabalham leads de outros BDRs — fix correto é um callable).
   const sdrWorkloads = getSdrWorkload(deals, activeSdrs.map((s: any) => s.id), deal.productId || 'wizmart');
+  // Troca de responsável — BDR, Gestor e Master (`manage_deal_cards`; a rule
+  // `canManageAllDeals` autoriza pelo mesmo trio de papéis). Negócio fechado
+  // (won/lost) não tem "dono" a trocar. Só o campo do responsável atual muda;
+  // `participantIds`/`responsibleId` são recalculados pela CF.
+  const canChangeResponsible = hasPermission('manage_deal_cards')
+    && (deal.status === 'open' || deal.status === 'in_queue');
+  const responsibleCandidates = eligibleResponsibles(deal, allUsers as any[]);
+  const handleChangeResponsible = async (data: { newUid: string; notes?: string }) => {
+    const { field, patch } = buildResponsibleChange(deal, data.newUid);
+    const fromName = sellerById(sellers, computeResponsibleId(deal)).name;
+    const toName = sellerById(sellers, data.newUid).name;
+    await updateDocument(deal.id, { ...patch, updatedAt: new Date() });
+    if (user?.uid) {
+      await addActivity({
+        type: 'note',
+        dealId: deal.id,
+        userId: user.uid,
+        text: `Responsável (${RESPONSIBLE_FIELD_LABEL[field]}) alterado de ${fromName} para ${toName}${data.notes ? ` — ${data.notes}` : ''}`,
+        status: 'completed',
+        coinsAwarded: 0,
+        wasOnTime: true,
+        cadenceType: 'manual',
+        productId: deal.productId || 'wizmart',
+      });
+    }
+    setShowChangeResponsibleModal(false);
+  };
+
   const handleAssignSdr = async (data: { sdrId: string; notes?: string }) => {
     await updateDocument(deal.id, {
       status: 'open',
@@ -344,32 +392,6 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
     }
   };
 
-  const handleAddNote = async () => {
-    const text = noteText.trim();
-    if (!text || !user?.uid) return;
-    setSavingNote(true);
-    try {
-      await addActivity({
-        type: 'note',
-        dealId: deal.id,
-        userId: user.uid,
-        text,
-        status: 'completed',
-        cadenceType: 'manual',
-        coinsAwarded: 0,
-        wasOnTime: true,
-        productId: deal.productId || 'wizmart',
-      });
-      setNoteText('');
-      onPoints({ pts: 0, custom: '📝 Nota registrada no card' });
-    } catch (err) {
-      console.error(err);
-      onPoints({ pts: 0, custom: '⚠️ Não foi possível salvar a nota.' });
-    } finally {
-      setSavingNote(false);
-    }
-  };
-
   // Edição do negócio (nome, empresa, valor, vencimento) — os botões "Editar"
   // e o lápis ao lado do nome não tinham handler algum (bug relatado pelo
   // cliente); abrem/fecham este modo de edição inline.
@@ -400,6 +422,26 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
     } finally {
       setSavingEdit(false);
     }
+  };
+
+  // Vínculo de Contato (aba Visão Geral) — ver ContactSelector.tsx e
+  // utils/dealContact.ts. `contactId` é a fonte de verdade para os modais de
+  // Email/WhatsApp, substituindo o match frágil por nome da empresa.
+  const handleLinkContact = async (contactId: string) => {
+    await updateDocument(deal.id, { contactId, updatedAt: new Date() });
+  };
+
+  const handleCreateContact = async (data: NewContactInput): Promise<string> => {
+    const ref = await addContact({
+      ...data,
+      company: deal.company,
+      owner: user?.uid || '',
+      productIds: deal.productId ? [deal.productId] : ['wizmart'],
+      last: 'agora',
+      tags: ['Novo'],
+      deals: 0,
+    });
+    return ref.id;
   };
 
   const handleCnpjLookup = async () => {
@@ -494,6 +536,9 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
         </button>
       )}
 
+      {/* Contrato de Comodato Smart Café (Fase 5.4) — some sozinho para outros SKUs */}
+      <ContractSlot deal={deal} />
+
       {/* Dados principais */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         {[
@@ -513,9 +558,19 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
         ))}
       </div>
 
+      {/* Vínculo de Contato — fonte de verdade pros modais de Email/WhatsApp
+          (achado crítico, PLANO_DESENHO_CRM.md 13/09/2026) */}
+      <ContactSelector
+        deal={deal}
+        contacts={contacts}
+        onLink={handleLinkContact}
+        onCreateContact={handleCreateContact}
+        readOnly={!canEditDeal}
+      />
+
       {/* Assinaturas do card — quem participou de cada etapa fica sempre visível,
           mesmo depois da passagem de bastão (Observações do cliente, jul/2026) */}
-      {(deal.bdrId || deal.assignedSdrId || deal.assignedRepId) && (
+      {(deal.bdrId || deal.assignedSdrId || deal.assignedRepId || deal.owner) && (
         <div className="card" style={{ padding: '12px 14px' }}>
           <div className="label" style={{ fontSize: 10.5, marginBottom: 8 }}>Equipe do lead</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -523,6 +578,9 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
               { label: 'BDR (origem)',        uid: deal.bdrId },
               { label: 'SDR responsável',     uid: deal.assignedSdrId },
               { label: 'Representante',       uid: deal.assignedRepId },
+              // Card sem BDR/SDR/Rep: o dono É o responsável (e é o campo que a
+              // troca de responsável altera) — sem esta linha a troca não aparecia aqui.
+              { label: 'Dono do card',        uid: (deal.bdrId || deal.assignedSdrId || deal.assignedRepId) ? undefined : deal.owner },
             ].filter(r => r.uid).map(r => {
               const person = sellerById(sellers, r.uid!);
               return (
@@ -699,6 +757,21 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
           })}
         </div>
       </div>
+
+      {/* Projeto de layout — atalho na Visão Geral (o cliente não achava o botão
+          do cabeçalho; PLANO_DESENHO_CRM_2.md, A1). */}
+      {canRequestProject(user, deal) && (
+        <div style={{ padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border)', background: '#F0F7F0', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Icon name="PenLine" size={18} color="#1A6B1A" />
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Projeto de layout</div>
+            <div className="muted" style={{ fontSize: 12 }}>Peça o projeto ao Design. O pedido e a entrega ficam registrados no histórico deste card.</div>
+          </div>
+          <button className="btn btn-sm" style={{ background: '#1A3E00', color: '#fff', border: 'none' }} onClick={() => setShowProjectModal(true)}>
+            <Icon name="PenLine" size={13} /> Solicitar Projeto
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -826,24 +899,19 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
     };
 
     const fmtWhen = (a: Activity): string => {
-      const raw = a.completedAt ?? a.scheduledAt ?? a.createdAt;
+      const raw = a.completedAt ?? a.scheduledAt ?? a.dueAt ?? a.createdAt;
       const d = raw?.toDate ? raw.toDate() : raw ? new Date(raw) : null;
       if (!d || isNaN(d.getTime())) return '';
       const datePart = d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
       const timePart = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      const prefix = a.status === 'pending' ? 'Agendado p/ ' : '';
-      return `${prefix}${datePart}, ${timePart}`;
+      return `${datePart}, ${timePart}`;
     };
 
-    const dealActivities = activities
-      .filter(a => a.dealId === deal.id)
-      .sort((x, y) => {
-        const dx = (x.completedAt ?? x.scheduledAt ?? x.createdAt)?.toDate?.()?.getTime?.()
-          ?? new Date(x.completedAt ?? x.scheduledAt ?? x.createdAt ?? 0).getTime();
-        const dy = (y.completedAt ?? y.scheduledAt ?? y.createdAt)?.toDate?.()?.getTime?.()
-          ?? new Date(y.completedAt ?? y.scheduledAt ?? y.createdAt ?? 0).getTime();
-        return dy - dx;
-      });
+    // Slide 5 do Desenho CRM: "Como o SDR deve enxergar a cadência" — "Deve
+    // enxergar individualmente ao abrir cada Card". Separado em duas listas
+    // (não uma timeline só) para que o que ainda falta fazer não fique
+    // enterrado sob o histórico — achado de QA manual, 12/09/2026.
+    const { upcoming: pendingActivities, history: dealActivities } = splitDealActivities(activities, deal.id);
 
     return (
       <div>
@@ -858,7 +926,51 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
             <Icon name="Calendar" size={14} color="#F59E0B" /> Reunião
           </button>
         </div>
-        {dealActivities.length === 0 ? (
+        {pendingActivities.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-2)', marginBottom: 8 }}>
+              Próximas na Cadência
+            </div>
+            <div className="tl">
+              {pendingActivities.map((a, i) => {
+                const ic = ACT_ICON[a.type] ?? ACT_ICON.note;
+                const isOverdue = a.status === 'overdue';
+                const canComplete = a.userId === user?.uid;
+                return (
+                  <div key={a.id ?? `pend-${i}`} className="tl-item">
+                    <div className="tl-ic" style={{ background: isOverdue ? '#B91C1C' : ic.c }}>
+                      <Icon name={ic.i as any} size={15} />
+                    </div>
+                    <div className="tl-body">
+                      <div>{ic.label}</div>
+                      <div className="tl-time" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        {fmtWhen(a)}
+                        <span className="badge" style={{ background: isOverdue ? '#FEE2E2' : '#FEF3C7', color: isOverdue ? '#B91C1C' : '#B45309', fontSize: 10 }}>
+                          {isOverdue ? 'Atrasado' : 'Agendado'}
+                        </span>
+                        {canComplete && (
+                          <button
+                            className="btn btn-outline btn-sm"
+                            style={{ padding: '2px 10px', fontSize: 11 }}
+                            onClick={() => handleCompleteActivity(a)}
+                          >
+                            <Icon name="Check" size={12} /> Registrar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {dealActivities.length > 0 && pendingActivities.length > 0 && (
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-2)', marginBottom: 8 }}>
+            Histórico
+          </div>
+        )}
+        {dealActivities.length === 0 && pendingActivities.length > 0 ? null : dealActivities.length === 0 ? (
           <div style={{ padding: '32px 8px', textAlign: 'center', color: 'var(--text-2)' }}>
             <Icon name="Inbox" size={28} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
             <div style={{ fontSize: 13 }}>Nenhuma atividade ainda.</div>
@@ -870,7 +982,6 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
               const ic = ACT_ICON[a.type] ?? ACT_ICON.note;
               const who = sellerById(sellers, a.userId).name;
               const isStandby = (a as any).cadenceType === 'standby';
-              const canComplete = a.status === 'pending' && a.userId === user?.uid;
               return (
                 <div key={a.id ?? i} className="tl-item">
                   <div className="tl-ic" style={{ background: ic.c }}>
@@ -881,16 +992,8 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
                     <div className="tl-time" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       {ic.label} · {who} · {fmtWhen(a)}
                       {isStandby && <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', fontSize: 10 }}>⏸ Standby {(a as any).standbyIndex}/{(a as any).standbyTotal}</span>}
-                      {a.status === 'pending' && <span className="badge" style={{ background: '#FEF3C7', color: '#B45309', fontSize: 10 }}>Agendado</span>}
-                      {canComplete && (
-                        <button
-                          className="btn btn-outline btn-sm"
-                          style={{ padding: '2px 10px', fontSize: 11 }}
-                          onClick={() => handleCompleteActivity(a)}
-                        >
-                          <Icon name="Check" size={12} /> Registrar
-                        </button>
-                      )}
+                      {a.status === 'skipped' && <span className="badge" style={{ background: 'var(--bg)', color: 'var(--text-2)', fontSize: 10 }}>Pulado</span>}
+                      {a.status === 'rescheduled' && <span className="badge" style={{ background: 'var(--bg)', color: 'var(--text-2)', fontSize: 10 }}>Remarcado</span>}
                     </div>
                   </div>
                 </div>
@@ -916,7 +1019,7 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
       .filter(h => h.dealId === deal.id)
       .sort((a, b) => (a.createdAt?.toDate?.()?.getTime?.() ?? 0) - (b.createdAt?.toDate?.()?.getTime?.() ?? 0));
 
-    interface JourneyStep { icon: string; color: string; text: string; time: string }
+    interface JourneyStep { icon: string; color: string; text: string; time: string; links?: { label: string; url: string }[] }
     const steps: JourneyStep[] = [];
 
     steps.push({
@@ -958,6 +1061,12 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
       }
     }
 
+    // Projeto de layout: solicitado → em andamento → entregue (A5, PLANO_DESENHO_CRM_2)
+    const projectSteps = projectTimelineSteps(timelineEvents);
+    for (const p of projectSteps) {
+      steps.push({ icon: p.icon, color: p.color, text: p.text, time: fmtTs(p.at), links: p.links });
+    }
+
     if (deal.status === 'won') {
       steps.push({ icon: 'Trophy', color: '#1A6B1A', text: 'Negócio ganho 🏆', time: fmtTs(deal.updatedAt) });
     } else if (deal.status === 'lost') {
@@ -981,6 +1090,15 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
             </div>
             <div className="tl-body">
               <div>{h.text}</div>
+              {(h.links?.length ?? 0) > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0' }}>
+                  {h.links!.map(l => (
+                    <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm" data-testid="link-entrega">
+                      <Icon name="Download" size={12} /> {l.label}
+                    </a>
+                  ))}
+                </div>
+              )}
               <div className="tl-time">{h.time}</div>
             </div>
           </div>
@@ -1003,69 +1121,21 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
   };
 
   // ── Aba Notas — comunicação SDR ↔ Rep e correções eventuais ───────────────
-  const renderNotas = () => {
-    const fmtWhen = (a: Activity): string => {
-      const raw = a.createdAt;
-      const d = raw?.toDate ? raw.toDate() : raw ? new Date(raw) : null;
-      if (!d || isNaN(d.getTime())) return '';
-      return `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}, ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
-    };
-
-    const notes = activities
-      .filter(a => a.dealId === deal.id && a.type === 'note')
-      .sort((x, y) => {
-        const dx = x.createdAt?.toDate?.()?.getTime?.() ?? new Date(x.createdAt ?? 0).getTime();
-        const dy = y.createdAt?.toDate?.()?.getTime?.() ?? new Date(y.createdAt ?? 0).getTime();
-        return dy - dx;
-      });
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {canEditDeal && (
-          <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div className="fl">Nova nota / correção</div>
-            <textarea
-              className="input"
-              rows={3}
-              placeholder="Contexto, correções ou orientações para quem seguir com o lead..."
-              value={noteText}
-              onChange={e => setNoteText(e.target.value)}
-              style={{ resize: 'vertical' }}
-            />
-            <button
-              className="btn btn-primary btn-sm"
-              style={{ alignSelf: 'flex-end' }}
-              disabled={savingNote || !noteText.trim()}
-              onClick={handleAddNote}
-            >
-              <Icon name="StickyNote" size={14} />
-              {savingNote ? 'Salvando...' : 'Registrar nota'}
-            </button>
-          </div>
-        )}
-
-        {notes.length === 0 ? (
-          <div className="muted" style={{ textAlign: 'center', padding: '26px 0', fontSize: 13 }}>
-            Nenhuma nota registrada neste lead ainda.
-          </div>
-        ) : (
-          notes.map(n => (
-            <div key={n.id} style={{ display: 'flex', gap: 10, padding: '10px 2px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: '#6B728018', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Icon name="StickyNote" size={15} color="#6B7280" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{(n as any).text}</div>
-                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  {n.userId === user?.uid ? 'Você' : sellerById(sellers, n.userId)?.name ?? 'Time'} · {fmtWhen(n)}
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    );
-  };
+  // Markdown, edição pelo autor e exclusão (autor ou master) vivem em
+  // ./notes/NotesTab — as notas do formato antigo (activities type 'note',
+  // inclusive as que o sistema grava sozinho) continuam aparecendo lá.
+  const renderNotas = () => (
+    <Suspense fallback={<div className="muted notes-empty">Carregando notas...</div>}>
+      <NotesTab
+        dealId={deal.id}
+        productId={deal.productId || 'wizmart'}
+        activities={activities}
+        sellers={sellers}
+        canWrite={canEditDeal}
+        onToast={msg => onPoints({ pts: 0, custom: msg })}
+      />
+    </Suspense>
+  );
 
   // ── JSX principal ─────────────────────────────────────────────────────────
 
@@ -1220,12 +1290,22 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
                 <Icon name="UserPlus" size={14} /> Atribuir SDR
               </button>
             )}
+            {canChangeResponsible && (
+              <button
+                className="btn btn-sm"
+                style={{ background: '#E0F2FE', color: '#0369A1', border: '1px solid #BAE6FD' }}
+                onClick={() => setShowChangeResponsibleModal(true)}
+                title="Troca o responsável atual do card (BDR, SDR ou Rep, conforme quem está com ele)"
+              >
+                <Icon name="ArrowRightLeft" size={14} /> Trocar responsável
+              </button>
+            )}
             {deal.standbyActive && (
               <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #F59E0B44', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <Icon name="PauseCircle" size={12} /> Em Standby{deal.standbyFollowUps ? ` (${deal.standbyFollowUps} follow-ups)` : ''}
               </span>
             )}
-            {deal.mainProduct === 'wizmart_minimercado' && (
+            {canRequestProject(user, deal) && (
               <button
                 className="btn btn-sm"
                 style={{ background: '#1A3E00', color: '#fff', border: 'none' }}
@@ -1303,6 +1383,17 @@ export function DealSidebar({ dealId, onClose, onPoints, variant = 'panel' }: De
         workloadBySdr={sdrWorkloads}
         onConfirm={handleAssignSdr}
         onCancel={() => setShowAssignSdrModal(false)}
+      />
+    )}
+
+    {/* ChangeResponsibleModal — troca de responsável (manage_deal_cards) */}
+    {showChangeResponsibleModal && (
+      <ChangeResponsibleModal
+        deal={deal}
+        currentName={computeResponsibleId(deal) ? s.name : 'Sem responsável'}
+        candidates={responsibleCandidates}
+        onConfirm={handleChangeResponsible}
+        onCancel={() => setShowChangeResponsibleModal(false)}
       />
     )}
 

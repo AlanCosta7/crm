@@ -28,7 +28,6 @@ import {
   SDR_ACTIVITY_TYPES,
   ACTIVITY_TYPE_CONFIG,
   dayOffsetLabel,
-  calcNewCards,
   calcCompletionRate,
   groupActivitiesByType,
   classifyDueActivities,
@@ -285,11 +284,6 @@ export function CadenciaPage() {
     refreshQueue();
   };
 
-  // Calcula previsão de cards amanhã baseado na taxa atual
-  const tomorrowCards = queue
-    ? calcNewCards(calcCompletionRate(filteredCompleted, filteredRequired))
-    : 3;
-
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -372,24 +366,13 @@ export function CadenciaPage() {
         <div
           className="card card-pad"
           style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
-          title="Cards de Hoje: os leads distribuídos para você trabalhar hoje. Cada card gera suas próprias atividades de contato."
+          title="Cards de Hoje: os leads atribuídos a você para trabalhar hoje. Cada card gera suas próprias atividades de contato."
         >
           <span className="label" style={{ fontSize: 11 }}>Cards de Hoje</span>
           <div style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums' }}>
             {filteredCards.length}
           </div>
           <div className="muted" style={{ fontSize: 11 }}>leads atribuídos a você</div>
-        </div>
-
-        {/* Previsão de amanhã */}
-        <div className="card card-pad" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span className="label" style={{ fontSize: 11 }}>Previsão Amanhã</span>
-          <div style={{ fontSize: 28, fontWeight: 800, color: tomorrowCards > 0 ? 'var(--primary)' : '#EF4444', fontVariantNumeric: 'tabular-nums' }}>
-            {tomorrowCards}
-          </div>
-          <div className="muted" style={{ fontSize: 11 }}>
-            {tomorrowCards === 0 ? '⚠️ complete mais hoje' : 'novos cards'}
-          </div>
         </div>
 
         {/* Moedas do ciclo */}
@@ -415,8 +398,8 @@ export function CadenciaPage() {
           </div>
           <p className="muted" style={{ fontSize: 13, maxWidth: 400, margin: '0 auto' }}>
             {completionPct === 100
-              ? 'Você completou todas as atividades de hoje. Amanhã você receberá novos cards às 7h.'
-              : 'O motor de cadência distribui os cards todo dia às 7h (horário de Brasília). Se você está vendo isso depois das 7h, clique em "Atualizar".'}
+              ? 'Você completou todas as atividades de hoje. Novos cards chegam quando o BDR ou a gestão atribuir leads a você.'
+              : 'Os cards chegam quando o BDR ou a gestão atribui leads a você, e os passos da régua são gerados todo dia às 7h (horário de Brasília). Se você acabou de receber um lead, clique em "Verificar novos cards".'}
           </p>
           <button className="btn btn-outline" style={{ margin: '16px auto 0' }} onClick={refreshQueue}>
             <Icon name="RefreshCw" size={15} />Verificar novos cards

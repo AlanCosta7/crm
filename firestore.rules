@@ -10,7 +10,34 @@ service cloud.firestore {
       return request.auth.token.role;
     }
     function isTenant(tid) {
-      return isAuth() && request.auth.token.tenantId == tid;
+      return isAuth() && request.auth.token.tenantId == tid && isActiveUser(tid);
+    }
+
+    // Usuário bloqueado perde acesso NA HORA (decisão do Alan, 10/09/2026).
+    //
+    // Por que isso existe: `onUserProfileWritten` já revoga os refresh tokens e
+    // desabilita a conta no Firebase Auth quando `isActive` vira false, mas um
+    // ID token JÁ EMITIDO segue criptograficamente válido até expirar (≤1h), e
+    // as rules do Firestore não checam revogação. Sem este `get()`, um
+    // representante dispensado continuaria lendo e escrevendo por até uma hora.
+    // O pedido do slide 12 é explícito: "quero inativar o CRM para que ele não
+    // tenha mais acesso" — e o Alan confirmou que vale o custo de uma leitura
+    // por operação para fechar essa janela.
+    //
+    // CUSTO: uma leitura de documento por avaliação de regra. Chamadas `get()`
+    // idênticas dentro da MESMA avaliação são cacheadas pelo Firestore, então
+    // `isTenant` sendo chamado várias vezes numa expressão custa um get só.
+    //
+    // SEM PERFIL = SEM ACESSO: se o documento do usuário não existe, nega. Tanto
+    // `inviteUser` quanto o seed criam o perfil junto com a conta; chegar aqui
+    // sem ele é anomalia, e anomalia não ganha acesso (mesmo raciocínio do
+    // fallback 'viewer' em `useAuth.ts`).
+    //
+    // `isActive` ausente é tratado como ATIVO, para não trancar do lado de fora
+    // os perfis anteriores ao campo.
+    function isActiveUser(tid) {
+      let userPath = /databases/$(database)/documents/tenants/$(tid)/users/$(request.auth.uid);
+      return exists(userPath) && get(userPath).data.get('isActive', true) == true;
     }
 
     // Roles com acesso administrativo total
@@ -43,14 +70,29 @@ service cloud.firestore {
       return isTenant(tid) && getRole() == 'design';
     }
 
+    // Financeiro (Fase 5.4 do PLANO_DESENHO_CRM.md, slide 11): só valida
+    // contratos de Comodato Smart Café — lê o card, marca `contractPaidAt` e
+    // nada mais. Não é operacional (não move estágio, não cria deal).
+    function isFinanceiro(tid) {
+      return isTenant(tid) && getRole() == 'financeiro';
+    }
+
     // Qualquer autenticado do tenant (inclusive viewer e design)
     function isAnyRole(tid) {
       return isTenant(tid);
     }
 
-    // Roles operacionais (excluindo viewer e design)
+    // Roles operacionais (excluindo viewer, design e financeiro)
+    //
+    // `financeiro` foi adicionado aqui depois de um teste pegar o buraco: sem
+    // esta exclusão, `isOperational` devolvia true pra ele (não é viewer, não é
+    // design), e a rule de CRIAÇÃO de deal (que só checa isOperational, sem
+    // passar pelas restrições narrow de update) deixava financeiro criar
+    // negócios do zero — o oposto de "só marca contractPaidAt e nada mais"
+    // (Fase 5.4 do PLANO_DESENHO_CRM.md). Qualquer outro `isOperational` do
+    // arquivo (contacts, companies, activities, notes) tinha o mesmo buraco.
     function isOperational(tid) {
-      return isTenant(tid) && getRole() != 'viewer' && getRole() != 'design';
+      return isTenant(tid) && getRole() != 'viewer' && getRole() != 'design' && getRole() != 'financeiro';
     }
 
     // Papéis sem "assinatura" própria (nunca são bdrId/assignedSdrId/assignedRepId/owner
@@ -76,19 +118,49 @@ service cloud.firestore {
         || request.auth.uid == data.get('assignedRepId', '');
     }
 
-    // Leitura: manager/design/viewer veem tudo; os demais só o que participam.
-    function canReadDeals(tid, data) {
-      return canSeeAllDeals(tid) || (isTenant(tid) && isDealParticipant(data));
+    // Autorização `manage_deal_cards` ("Movimentar cards e trocar responsável"):
+    // quem a tem enxerga e edita QUALQUER card do tenant — inclusive mover de
+    // estágio e trocar quem é o responsável (bdrId/assignedSdrId/assignedRepId/
+    // owner). Decisão do Alan, 21/09/2026.
+    //
+    // A permissão vem do perfil do usuário (`tenants/{tid}/roles/{role}`, editável
+    // pelo master em Configurações › Perfis). Espelha `effectivePermissions` de
+    // src/utils/rolePermissions.ts — mantenha as duas em sincronia:
+    //  - sem documento de perfil → padrão do código: só o BDR (Gestor e Master já
+    //    passam por `isManager`, abaixo);
+    //  - com documento → o que está na lista `permissions`, mais o rollout da
+    //    versão 1 (BDR/Gestor) para perfis salvos ANTES de `permissionsRev` existir.
+    // Só perfis operacionais entram: viewer, design e financeiro NUNCA editam card,
+    // mesmo que alguém marque a permissão no perfil deles.
+    //
+    // CUSTO: mais uma leitura (o perfil) por avaliação — por isso este ramo é o
+    // ÚLTIMO dos `||` em canReadDeals/canEditDeal: SDR/Rep participantes nem chegam aqui.
+    function roleGrantsManageDeals(tid) {
+      let rolePath = /databases/$(database)/documents/tenants/$(tid)/roles/$(getRole());
+      return exists(rolePath)
+        ? ('manage_deal_cards' in get(rolePath).data.get('permissions', [])
+            || (get(rolePath).data.get('permissionsRev', 0) < 1 && getRole() in ['bdr', 'manager']))
+        : getRole() == 'bdr';
     }
 
-    // Edição: só master/manager têm bypass total — diferente da leitura,
-    // Viewer/Design NUNCA editam (isOperational já os exclui; usar
+    function canManageAllDeals(tid) {
+      return isManager(tid) || (isOperational(tid) && roleGrantsManageDeals(tid));
+    }
+
+    // Leitura: manager/design/viewer veem tudo, quem tem `manage_deal_cards` também;
+    // os demais só o que participam.
+    function canReadDeals(tid, data) {
+      return canSeeAllDeals(tid) || (isTenant(tid) && isDealParticipant(data)) || canManageAllDeals(tid);
+    }
+
+    // Edição: master/manager e quem tem `manage_deal_cards` têm bypass total — diferente
+    // da leitura, Viewer/Design NUNCA editam (isOperational já os exclui; usar
     // canSeeAllDeals aqui seria dar edição a quem só devia ter visão).
     // Confirmado com o Alan (22/08): TODOS os 3 papéis que já assinaram o card
     // (BDR/SDR/Rep) podem editar, não só quem tem o bastão agora — por isso o
     // gate é isDealParticipant, não responsibleId.
     function canEditDeal(tid, data) {
-      return isManager(tid) || (isOperational(tid) && isDealParticipant(data));
+      return (isOperational(tid) && isDealParticipant(data)) || canManageAllDeals(tid);
     }
 
     function tokenProducts() {
@@ -117,9 +189,37 @@ service cloud.firestore {
       return request.resource.data.get('productIds', ['wizmart']).hasAny(tokenProducts());
     }
 
-    // cohortKeys não podem ser escritos diretamente pelo cliente
-    function notWritingCohortKeys() {
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['cohortKeys']);
+    // Campos derivados do deal que só o servidor escreve.
+    //  - cohortKeys: gravado por onDealStageChanged
+    //  - origin: gravado por onDealParticipantsChanged (Fase 1.3 do
+    //    PLANO_DESENHO_CRM.md). É base de relatório e de comissão — deixar a UI
+    //    reescrever a origem permitiria maquiar de onde o lead veio.
+    // participantIds e responsibleId também são derivados, mas continuam de
+    // fora desta lista: o cliente legado ainda os envia em alguns caminhos de
+    // criação, e a CF sobrescreve logo depois. Endurecer isso é item separado.
+    function notWritingServerDerived() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['cohortKeys', 'origin']);
+    }
+
+    // Campos de `users` que definem permissão (viram custom claim via a CF
+    // onUserProfileWritten) — nunca editáveis por quem só é dono do documento.
+    function isEscalatingSelf() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['role', 'productIds', 'isActive', 'commissionTier']);
+    }
+
+    // Fase 5.4: o deal é um Comodato Smart Café — só esses têm o slot de
+    // contrato que o financeiro precisa validar.
+    function isComodatoDeal(data) {
+      return data.get('mainProduct', '') == 'smartcafe_comodato';
+    }
+
+    // `updatedAt` entra na allowlist porque TODA escrita via useFirestoreMutations
+    // (o único caminho de escrita do client) inclui esse campo automaticamente —
+    // sem ele aqui, a própria confirmação de pagamento seria negada.
+    function isOnlyMarkingContractPaid() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['contractPaidAt', 'contractPaidBy', 'updatedAt']);
     }
 
     // ── Tenant Root ────────────────────────────────────────────────────────────
@@ -127,18 +227,33 @@ service cloud.firestore {
 
       // Deals / Negócios
       // design: somente leitura
+      // financeiro: só lê e só marca contractPaidAt em Comodato Smart Café —
+      // fora desse SKU ele não enxerga o deal nem toca em nada (Fase 5.4).
       match /deals/{dealId} {
-        allow read:   if canReadDeals(tid, resource.data) && canAccessDocProduct(resource.data);
+        allow read:   if (canReadDeals(tid, resource.data) && canAccessDocProduct(resource.data))
+                      || (isFinanceiro(tid) && isComodatoDeal(resource.data));
         // Todo usuário operacional pode criar um card — a restrição de
         // participação vale só para EDIÇÃO de cards já existentes (confirmado
         // com o Alan, 22/08). Antes: isBdr(tid) (só master/manager/bdr) negava
         // a criação pro SDR mesmo o client já tratando esse caso.
         allow create: if isOperational(tid) && requestProductAllowed();
-        allow update: if canEditDeal(tid, resource.data)
-                      && canAccessDocProduct(resource.data)
-                      && requestProductAllowed()
-                      && notWritingCohortKeys();
+        allow update: if (canEditDeal(tid, resource.data)
+                            && canAccessDocProduct(resource.data)
+                            && requestProductAllowed()
+                            && notWritingServerDerived())
+                      || (isFinanceiro(tid) && isComodatoDeal(resource.data) && isOnlyMarkingContractPaid());
         allow delete: if isMaster(tid);
+      }
+
+      // Perfis (RBAC dinâmico — Configurações › Perfis). Todo usuário do tenant lê
+      // (o `usePermissions` carrega a lista pra montar o menu e os botões); só o
+      // master grava. Sem esta regra a coleção era negada por padrão e a aba
+      // Perfis não persistia nada. Os documentos são só a lista de permissões da
+      // UI — a autorização real nas rules segue os claims (e, para
+      // `manage_deal_cards`, o documento do perfil: ver `roleGrantsManageDeals`).
+      match /roles/{roleId} {
+        allow read:  if isAnyRole(tid);
+        allow write: if isMaster(tid);
       }
 
       // Funnels (configurados pelo admin, lidos por todos)
@@ -171,9 +286,16 @@ service cloud.firestore {
       }
 
       // Usuários
+      //
+      // ATENÇÃO (PLANO_DESENHO_CRM.md Fase 0): desde a CF `onUserProfileWritten`,
+      // os campos abaixo deixaram de ser decorativos — o que é gravado aqui vira
+      // custom claim no token e, portanto, permissão real nas rules. Um usuário
+      // editando o próprio documento não pode tocá-los, ou se promove a master
+      // sozinho (e um bloqueado se desbloqueia).
       match /users/{userId} {
         allow read:  if isAnyRole(tid) && (request.auth.uid == userId || canAccessDocProducts(resource.data));
-        allow update: if (isMaster(tid) && requestProductsAllowed()) || (isTenant(tid) && request.auth.uid == userId && requestProductsAllowed());
+        allow update: if (isMaster(tid) && requestProductsAllowed())
+                      || (isTenant(tid) && request.auth.uid == userId && requestProductsAllowed() && !isEscalatingSelf());
         allow create: if isMaster(tid) && requestProductsAllowed();
         allow delete: if isMaster(tid);
       }
@@ -192,6 +314,54 @@ service cloud.firestore {
                          && request.resource.data.userId == request.auth.uid
                          && requestProductAllowed();
         allow delete: if isMaster(tid);
+      }
+
+      // "Visualizar como" (impersonação) — só Cloud Functions escrevem
+      // (Admin SDK ignora rules); nada aqui é gravável pelo client.
+      //
+      // active_impersonations/{targetUid}: fonte de verdade de "estou sendo
+      // impersonado agora?" — o doc ID É o uid de quem está sendo visto, então
+      // a própria pessoa lê o seu; master lê qualquer um (o banner some quando
+      // o doc é apagado por endImpersonation).
+      match /active_impersonations/{uid} {
+        allow read:  if isTenant(tid) && (request.auth.uid == uid || isMaster(tid));
+        allow write: if false;
+      }
+
+      // Histórico permanente de quem impersonou quem, para auditoria.
+      match /impersonation_log/{logId} {
+        allow read:  if isMaster(tid);
+        allow write: if false;
+      }
+
+      // Auditoria de login/logoff (PLANO_DESENHO_CRM.md Fase 6.1). Só
+      // `logSessionEvent`/`endUserSession` escrevem — o IP/user-agent perde o
+      // sentido de auditoria se quem está sendo auditado puder escrever o
+      // próprio registro. manager também lê (não só master): é quem
+      // acompanha o dia a dia da equipe na tela de Auditoria.
+      match /user_sessions/{sessionId} {
+        allow read:  if isManager(tid);
+        allow write: if false;
+      }
+
+      // Notas ricas do card (markdown + anexos no Storage)
+      //  - viewer e design LEEM tudo, anexos inclusive (decisão do cliente, 31/08)
+      //  - autor edita e exclui a sua; master exclui qualquer uma (moderação)
+      //  - `mentions` é gravado pelo client; a notificação em si só sai por
+      //    Cloud Function (a coleção notifications não aceita escrita do client)
+      match /notes/{noteId} {
+        allow read:   if isAnyRole(tid) && canAccessDocProduct(resource.data);
+        allow create: if isOperational(tid)
+                         && request.resource.data.authorId == request.auth.uid
+                         && requestProductAllowed();
+        // authorId e createdAt são imutáveis — nota não troca de dono
+        allow update: if isOperational(tid)
+                         && resource.data.authorId == request.auth.uid
+                         && request.resource.data.authorId == resource.data.authorId
+                         && request.resource.data.createdAt == resource.data.createdAt
+                         && requestProductAllowed();
+        allow delete: if (isOperational(tid) && resource.data.authorId == request.auth.uid)
+                         || isMaster(tid);
       }
 
       // Feed de atividade legado
@@ -326,9 +496,31 @@ service cloud.firestore {
       }
 
       // Configurações e Integrações (somente master)
+      // `settings/cadence` é a agenda de trabalho do próprio time — régua de
+      // contato e blocos de horário. O SDR PRECISA ler para montar a fila do dia
+      // (Fase 2 do PLANO_DESENHO_CRM.md), e não há nada confidencial ali.
+      //
+      // Em Firestore rules os matches se somam (acesso concedido se QUALQUER um
+      // permitir), então este bloco amplia `settings/cadence` sem afetar os
+      // outros documentos de settings — que seguem master-only pelo match
+      // genérico abaixo, onde vivem token de TV e chaves de integração.
+      //
+      // A escrita por manager também corrige um bug existente: a rota
+      // `/settings/cadencia` é master+manager, mas a regra genérica é `isMaster`,
+      // então o gestor abria a tela e tomava permission-denied ao salvar.
+      match /settings/cadence {
+        allow read:  if isAnyRole(tid);
+        allow write: if isManager(tid);
+      }
+
+      // Manager passou a ter a permissão `view_admin_settings` por padrão
+      // (PLANO_DESENHO_CRM.md Fase 6.1, achado de QA manual: ele já podia
+      // encerrar sessão de usuário pelas rules/CF, mas sem a tela inteira de
+      // Configurações visível — inclusive as abas "Minha Empresa" e
+      // "Integrações", que leem daqui — o botão não tinha como aparecer).
       match /settings/{docId} {
-        allow read:   if isMaster(tid);
-        allow write:  if isMaster(tid);
+        allow read:   if isManager(tid);
+        allow write:  if isManager(tid);
       }
 
       // Links de TV
@@ -337,6 +529,13 @@ service cloud.firestore {
         allow create, update: if isManager(tid) && requestProductAllowed();
         // Delete (revogar) não tem request.resource.data — valida pelo doc existente.
         allow delete:        if isManager(tid) && canAccessDocProduct(resource.data);
+      }
+
+      // Eventos de produtividade do SDR (reunião agendada/realizada, visita
+      // agendada) — base do Ranking da TV. Só a CF `onDealStageChanged` escreve.
+      match /sdr_events/{eventId} {
+        allow read:  if isManager(tid);
+        allow write: if false;
       }
 
       // ── v3: Metas por usuário ──────────────────────────────────────────────
@@ -378,6 +577,18 @@ service cloud.firestore {
     // Somente a Cloud Function captureLead (Admin SDK) lê/escreve.
     match /rate_limits/{docId} {
       allow read, write: if false;
+    }
+
+    // ── CMS da Landing Page B2B (wizmart-lp-b2b) ─────────────────────────────
+    // Coleção RAIZ de propósito (não sob tenants/{tid}): é conteúdo do site
+    // público, não dado de negócio do CRM. Leitura pública (a própria LP lê
+    // sem login para hidratar a página); escrita só para quem tem a claim
+    // role == 'master' — igual ao papel "Admin Master" do CRM, mas sem
+    // depender de resolver isActiveUser(tid), porque a claim role já é
+    // populada por onUserProfileWritten independente do tenant.
+    match /lp_content/{docId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.token.role == 'master';
     }
   }
 }

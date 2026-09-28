@@ -61,6 +61,26 @@ describe('usePermissions — hook de controle de acesso', () => {
     expect(result.current.hasPermission('view_admin_settings')).toBe(false);
   });
 
+  // Fase 6.1 do PLANO_DESENHO_CRM.md: manager já podia encerrar a sessão de um
+  // usuário nas rules/CF (`assertCanEndSession`), mas sem esta permissão a
+  // tela de Configurações inteira — onde fica esse botão — ficava invisível
+  // pra ele. Achado no QA manual do teste B4.
+  it('manager tem view_admin_settings por padrão — precisa da tela pra encerrar sessão de alguém', () => {
+    (useAuthStore as any).mockReturnValue({
+      user: { role: 'manager', tenantId: 'tenant-1' },
+    });
+    (useFirestoreCollection as any).mockReturnValue({
+      data: [],
+      loading: false,
+      error: null,
+    });
+
+    const { result } = renderHook(() => usePermissions());
+
+    expect(result.current.permissions).toContain('view_admin_settings');
+    expect(result.current.hasPermission('view_admin_settings')).toBe(true);
+  });
+
   it('deve mesclar e usar permissões customizadas do Firestore se o perfil correspondente existir', () => {
     const mockRoles = [
       { id: 'sdr', name: 'SDR Customizado', permissions: ['view_dashboard', 'permissao_custom_sdr'] },

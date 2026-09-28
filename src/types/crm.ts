@@ -64,6 +64,12 @@ export interface Seller {
 // ─── Funil v3 ─────────────────────────────────────────────────────────────────
 export type FunnelType = 'inbound' | 'outbound' | 'hunter' | 'main';
 
+/**
+ * Origem do lead como ATRIBUTO do card (não como funil).
+ * Espelha `DealOrigin` em `functions/src/deals/dealOrigin.ts`.
+ */
+export type DealOrigin = 'inbound' | 'outbound';
+
 export interface FunnelStage {
   id: string;
   name: string;
@@ -112,11 +118,34 @@ export interface Deal {
   id: string;
   name: string;
   company: string;
+  /**
+   * Vínculo explícito com o Contact escolhido no card (aba Visão Geral).
+   * Fonte de verdade para resolver o destinatário de email/WhatsApp — substitui
+   * o match frágil por `contacts.find(c => c.company === deal.company)`
+   * (achado crítico, PLANO_DESENHO_CRM.md 13/09/2026). Ausente em deals
+   * anteriores a este campo: ver `resolveDealContact` (utils/dealContact.ts)
+   * para o fallback por nome da empresa.
+   */
+  contactId?: string;
   value: number;
   stage: string;
   funnelId?: string;
   funnelType?: FunnelType;
   productId?: ProductId;
+  /**
+   * De onde o lead veio — Inbound (levantou a mão num formulário nosso) ou
+   * Outbound (prospecção ativa do time). Fase 1.3 do PLANO_DESENHO_CRM.md.
+   *
+   * NUNCA escrito pelo cliente (as rules bloqueiam): é derivado no servidor pela
+   * CF `onDealParticipantsChanged` a partir de `leadOrigin`/`funnelType`, com a
+   * regra em `functions/src/deals/dealOrigin.ts`.
+   *
+   * Existe porque o deck pede um board ÚNICO por produto (sem abas separadas de
+   * Inbound e Outbound), mas com a quebra por origem nos cards e nos relatórios.
+   * Deals antigos podem estar sem o campo até o backfill rodar — tratar ausente
+   * como 'outbound' na leitura, igual ao default do servidor.
+   */
+  origin?: DealOrigin;
   owner: string;
   bdrId?: string;
   assignedSdrId?: string;
@@ -159,6 +188,13 @@ export interface Deal {
   visitType?: 'presential' | 'video';
   visitScheduledAt?: any;
   visitDoneAt?: any;
+  /**
+   * Data e hora da reunião com o SDR (etapa `reuniao_agendada`, Fase 1.1).
+   * Coletada no modal ao mover o card para a etapa; é a base da régua de agenda
+   * da Fase 3 — sem ela não há como calcular a confirmação "24h úteis antes".
+   */
+  meetingScheduledAt?: any;
+  meetingDoneAt?: any;
   location?: {
     state: string;
     city: string;
@@ -182,6 +218,28 @@ export interface Deal {
   // v3 — cross-sell
   mainProduct?: ProductSKU;
   additionalProducts?: ProductSKU[];
+  /**
+   * Contrato do Comodato Smart Café (Fase 5.4 do PLANO_DESENHO_CRM.md, slide 11).
+   * Escrito por quem fecha o negócio (rep/gestão) ao anexar o PDF assinado no
+   * card. `financeiro` NUNCA escreve este campo — só `contractPaidAt` abaixo.
+   */
+  contract?: {
+    url: string;
+    storagePath: string;
+    fileName: string;
+    mime: string;
+    size: number;
+    uploadedBy: string;
+    uploadedAt: any;
+  };
+  /**
+   * Marcado pelo papel `financeiro` ao confirmar que a 1ª mensalidade do
+   * comodato foi paga — é o gatilho de comissão do modelo `smartcafe_comodato`
+   * (`requiresFirstInvoice` em `comissoes/calc.ts`). `firestore.rules` permite a
+   * `financeiro` escrever ESTES DOIS campos e nada mais no documento do deal.
+   */
+  contractPaidAt?: any;
+  contractPaidBy?: string;
   // v3 — KPI
   visitPopulation?: number;
   conquestValue?: number;
@@ -315,17 +373,91 @@ export interface Lead {
 export interface AppNotification {
   id: string;
   userId: string;
-  type: 'lead_received' | string;
+  type: 'lead_received' | 'note_mention' | string;
   title: string;
   body: string;
   dealId?: string;
   leadId?: string;
   sourceId?: string;
+  /** Rota interna para onde o sino leva; sem ela vai para o card/pipeline. */
+  link?: string;
   read: boolean;
   createdAt?: any;
 }
 
+// ─── Notas ricas do card ─────────────────────────────────────────────────────
+
+/** Entidade à qual a nota está ancorada. Hoje só `deal`; contact/company são
+ *  suportados pelo modelo para reaproveitar a feature sem refatoração. */
+export type NoteEntityType = 'deal' | 'contact' | 'company';
+
+export type NoteAttachmentKind = 'image' | 'video' | 'audio' | 'document';
+
+/** Origem do anexo — só telemetria de UX, não afeta permissão. */
+export type NoteAttachmentSource = 'upload' | 'camera' | 'mic' | 'paste';
+
+/**
+ * Anexo de uma nota. O binário mora no Storage em
+ * `tenants/{tid}/notes/{noteId}/{id}/{name}`; este objeto é só o metadado
+ * guardado dentro do doc da nota.
+ */
+export interface NoteAttachment {
+  id: string;
+  kind: NoteAttachmentKind;
+  /** Nome original sanitizado — usado na exibição e no download */
+  name: string;
+  mime: string;
+  size: number;
+  storagePath: string;
+  url: string;
+  /** Miniatura (imagem) ou poster (vídeo), gerados no client */
+  thumbPath?: string;
+  thumbUrl?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  source: NoteAttachmentSource;
+  uploadedBy: string;
+  uploadedAt?: any;
+}
+
+/**
+ * Nota do card. Coleção: `tenants/{tid}/notes`.
+ *
+ * Vive separada de `activities` de propósito: `activities` é assinada inteira
+ * por várias telas e alimenta KPIs/gamificação — anexos e markdown não têm o
+ * que fazer lá. Uma Cloud Function espelha um resumo enxuto em `activities`
+ * para o feed geral continuar mostrando as notas (sem os anexos).
+ *
+ * Permissões: autor edita e exclui a sua; master exclui qualquer uma
+ * (moderação); viewer e design leem tudo, inclusive anexos.
+ */
+export interface Note {
+  id?: string;
+  tenantId: string;
+  entityType: NoteEntityType;
+  entityId: string;
+  /** Espelha `entityId` quando entityType === 'deal' — mantém a query simples */
+  dealId?: string;
+  productId: ProductId;
+  authorId: string;
+  /** Markdown cru — fonte da verdade; a renderização é sempre sanitizada */
+  body: string;
+  attachments: NoteAttachment[];
+  /** uids mencionados no body, desnormalizados para a trigger de notificação */
+  mentions?: string[];
+  pinned?: boolean;
+  createdAt?: any;
+  updatedAt?: any;
+  /** Só existe a partir da 1ª edição — dispara o selo "editada" */
+  editedAt?: any;
+  editCount?: number;
+}
+
 // ─── Activity v2 ─────────────────────────────────────────────────────────────
+// 'agenda' — tarefas da régua de agenda (Fase 3 do PLANO_DESENHO_CRM.md):
+// follow-up e confirmação de compromisso já marcado. Tipo próprio para NÃO
+// ser contado como reunião pelos indicadores de "Reuniões Agendadas".
 export type ActivityType =
   | 'email'
   | 'linkedin'
@@ -335,7 +467,7 @@ export type ActivityType =
   | 'visit'
   | 'proposal'
   | 'note'
-  | 'win';
+  | 'win' | 'agenda';
 
 export type ActivityStatus = 'pending' | 'completed' | 'overdue' | 'skipped' | 'rescheduled';
 
@@ -365,6 +497,14 @@ export interface Activity {
   wasOnTime?: boolean;
   overdueNotifiedAt?: any;
   overdueNotificationCount?: number;
+  /**
+   * Bloco de horário em que a atividade cai (Fase 2 do PLANO_DESENHO_CRM.md).
+   * Gravado pelo `dailyCadenceEngine` a partir de `settings/cadence.sdr.timeBlocks`;
+   * `null` quando o canal não tem bloco configurado — a atividade aparece no
+   * grupo "Sem horário definido" da fila, nunca é escondida.
+   * Atividades anteriores à Fase 2 não têm o campo: a tela reagrupa pelo `type`.
+   */
+  blockId?: string | null;
   createdAt?: any;
   // campos legado compatibilidade
   who?: string;
@@ -513,8 +653,13 @@ export interface KpiSnapshot {
   activitiesWhatsapp?: number;
   activitiesCall?: number;
   cadenceCompletionRate?: number;
+  /** Atividades `type: 'meeting'` criadas no período (por SDR: `userId`). Regra em functions/src/kpis/agendaMetrics.ts. */
   meetingsScheduled?: number;
+  /** Deals hoje em etapa de visita/degustação (por SDR: `assignedSdrId`) — estoque na hora da execução. */
   visitsScheduled?: number;
+  /** Quebra por origem das reuniões — `unresolved` é reunião cujo deal não foi encontrado. */
+  meetingsByOrigin?: { inbound: number; outbound: number; unresolved: number; total: number };
+  visitsByOrigin?: { inbound: number; outbound: number; total: number };
   visitsByState?: Record<string, number>;
   visitsByCity?: Record<string, number>;
   visitsDone?: number;
@@ -560,7 +705,8 @@ export interface ProjectRequest {
   companyName: string;
   requestedBy: string;
   requestedByName: string;
-  requestedByRole: 'bdr' | 'sdr' | 'rep';
+  /** Papel real de quem pediu — gestão (manager/master) também solicita. */
+  requestedByRole: 'bdr' | 'sdr' | 'rep' | 'manager' | 'master';
   pdvTypes: PDVType[];
   quantities: {
     gondola: number;
@@ -572,11 +718,18 @@ export interface ProjectRequest {
   };
   walls: { wall1: string; wall2: string; wall3: string };
   notes: string;
+  /** Fotos/vídeos do local (legado: só URLs). Solicitações novas trazem `attachments`. */
   mediaUrls: string[];
+  attachments?: NoteAttachment[];
   status: ProjectStatus;
   assignedToDesignerId?: string;
+  assignedToDesignerName?: string;
   assignedAt?: any;
+  /** Link de entrega (Drive etc.) — opcional quando há arquivo entregue. */
   deliveredFileUrl?: string;
+  /** Arquivos do projeto pronto, enviados pelo Design (PDF, imagem, vídeo). */
+  deliveredAttachments?: NoteAttachment[];
+  deliveredByName?: string;
   deliveredAt?: any;
   requestedAt: any;
   updatedAt: any;
@@ -620,10 +773,15 @@ export interface TvSeller {
 export interface TvLink {
   id?: string;
   token: string;
+  deviceName?: string;
   productId?: ProductScope;
   created: string;
   expires: string;
   active: boolean;
+  /** Métricas que o canal pode exibir — o gate real acontece no servidor (`tvHelper`). */
+  allowedMetrics?: string[];
+  /** Período inicial do Ranking de SDRs; quem está na TV pode alternar. */
+  rankingPeriod?: 'day' | 'week' | 'month';
 }
 
 // ─── Settings / Admin ─────────────────────────────────────────────────────────
@@ -638,6 +796,44 @@ export interface SettingUser {
   commissionTier?: CommissionTier;
   last: string;
   isActive?: boolean;
+  /**
+   * Instante do último login (Fase 6.1 do PLANO_DESENHO_CRM.md), gravado pela
+   * CF `logSessionEvent`. `last` (acima) continua existindo como o texto
+   * pronto para a coluna "Último Acesso" — este campo é a fonte estruturada
+   * por trás dele, para ordenar/filtrar sem parsear string.
+   */
+  lastLoginAt?: any;
+  /**
+   * Gravado pela CF `endUserSession` ("Encerrar Sessão", Fase 6.1). Sozinho,
+   * `revokeRefreshTokens` não derruba uma sessão já aberta — o ID token em
+   * cache no navegador segue válido até expirar (~1h) sem precisar de
+   * refresh. `useAuth.ts` assina este documento ao vivo e compara o valor
+   * deste campo com o último visto NESTA sessão do listener: se ele MUDAR
+   * enquanto o listener já estava aberto, força `signOut()` na hora — sem
+   * esperar reload.
+   */
+  forceLogoutAt?: any;
+}
+
+// ─── Auditoria de sessão (Fase 6.1 do PLANO_DESENHO_CRM.md) ──────────────────
+// Slide 12: "Gerenciador de Login e Logoff do CRM". Coleção
+// `tenants/{tid}/user_sessions`, escrita só por Cloud Function — nunca pelo
+// client (o valor de IP/user-agent perde o sentido de auditoria se quem está
+// sendo auditado puder escrever o próprio registro).
+export type SessionEventType = 'login' | 'logout' | 'revoked';
+
+export interface UserSessionEvent {
+  id?: string;
+  uid: string;
+  userName: string;
+  userRole: UserRole;
+  event: SessionEventType;
+  at: any;
+  ip?: string;
+  userAgent?: string;
+  /** Preenchido só em `event: 'revoked'` — quem forçou o encerramento. */
+  endedBy?: string;
+  endedByName?: string;
 }
 
 // ─── Contact v2 ──────────────────────────────────────────────────────────────

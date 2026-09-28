@@ -1,4 +1,22 @@
-import { useState } from 'react';
+/**
+ * ActivitiesPage.tsx — duas telas com o mesmo nome, finalmente separadas
+ *
+ * Fase 2 do PLANO_DESENHO_CRM.md (slides 6 e 9). O deck pedia que esta página
+ * mostrasse a FILA DO DIA em blocos de horário, mas ela era (e continua sendo,
+ * na aba Histórico) um FEED do que já aconteceu. São necessidades diferentes:
+ *
+ *   Meu Dia   → o que precisa acontecer hoje, agrupado por bloco de horário.
+ *               É a tela que o SDR abre ao entrar no CRM (slide 9).
+ *   Histórico → a timeline de tudo que já foi registrado. O comportamento
+ *               anterior desta página, intacto.
+ *
+ * O escopo por papel continua o de jul/2026: o SDR vê só as próprias
+ * atividades; gestão e BDR veem o time todo (e abrem "Meu Dia" em leitura).
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../../config/firebase';
 import { useFirestoreCollection } from '../../hooks/useFirestore';
 import type { ActivityFeedItem, Seller } from '../../types/crm';
 import { Av } from '../../components/ui/Av';
@@ -7,6 +25,9 @@ import { sellerById } from '../../utils/crmFormat';
 import { useAuthStore } from '../../stores/authStore';
 import { useUIStore } from '../../stores/uiStore';
 import { matchesProductId } from '../../utils/productScope';
+import { MeuDiaPanel } from './MeuDiaPanel';
+import { DEFAULT_TIME_BLOCKS, normalizeTimeBlocks, type TimeBlockDef } from '../../utils/timeBlocks';
+import { getTodayBRT } from '../../utils/cadenceUtils';
 
 const ACT_ICON: Record<string, { i: string; c: string }> = {
   win: { i: 'Trophy', c: '#1A6B1A' },
@@ -17,6 +38,8 @@ const ACT_ICON: Record<string, { i: string; c: string }> = {
   call: { i: 'Phone', c: '#F59E0B' },
   linkedin: { i: 'Linkedin', c: '#0077B5' },
   visit: { i: 'MapPin', c: '#3B82F6' },
+  // Tarefas da régua de agenda (Fase 3) — follow-up e confirmação de compromisso.
+  agenda: { i: 'CalendarCheck', c: '#B45309' },
 };
 
 const ACT_FILTERS = ['Todos', 'Ligação', 'LinkedIn', 'WhatsApp', 'Email', 'Reunião', 'Ganho', 'Nota'];
@@ -29,6 +52,27 @@ export function ActivitiesPage() {
   const { user } = useAuthStore();
   const ui = useUIStore();
   const productScope = ui.productScope ?? ui.productId;
+
+  // Cada SDR vê apenas as próprias atividades (Observações do cliente, jul/2026).
+  // Gestão, BDR e demais papéis continuam vendo o time todo.
+  const isSdr = user?.role === 'sdr';
+
+  // O SDR abre na fila do dia (slide 9); quem não tem fila própria abre no
+  // histórico, que é o que interessa a gestão e BDR.
+  const [tab, setTab] = useState<'dia' | 'historico'>(isSdr ? 'dia' : 'historico');
+
+  // Blocos de horário configurados pelo admin em settings/cadence. A leitura é
+  // liberada a todo o tenant justamente para esta tela (ver firestore.rules).
+  const [blocks, setBlocks] = useState<TimeBlockDef[]>(DEFAULT_TIME_BLOCKS);
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    const ref = doc(db, 'tenants', user.tenantId, 'settings', 'cadence');
+    return onSnapshot(
+      ref,
+      snap => setBlocks(normalizeTimeBlocks(snap.data()?.sdr?.timeBlocks)),
+      err => console.warn('[ActivitiesPage] Não foi possível ler os blocos de horário:', err),
+    );
+  }, [user?.tenantId]);
 
   // Coleção real (cadência, standby, handoff, notas) + feed legado v1
   const { data: legacyFeed, loading } = useFirestoreCollection<ActivityFeedItem>('activity');
@@ -48,10 +92,6 @@ export function ActivitiesPage() {
     return true;
   });
 
-  // Cada SDR vê apenas as próprias atividades (Observações do cliente, jul/2026).
-  // Gestão, BDR e demais papéis continuam vendo o time todo.
-  const isSdr = user?.role === 'sdr';
-
   const scopedActivities = allActivities
     .filter(a => matchesProductId(productScope, a.productId || 'wizmart'))
     .filter(a => !isSdr || actorId(a) === user?.uid)
@@ -59,6 +99,28 @@ export function ActivitiesPage() {
       const t = (a: any) => a.createdAt?.toDate?.()?.getTime?.() ?? 0;
       return t(y) - t(x);
     });
+  // Fila do dia: só as atividades DE HOJE e DO PRÓPRIO usuário. `scheduledAt`
+  // é o horário do bloco (gravado pelo motor); atividades anteriores à Fase 2
+  // não têm bloco e caem no balde "Sem horário" do painel.
+  const minhasDeHoje = useMemo(() => {
+    const hoje = getTodayBRT();
+    const diaDe = (v: unknown): string => {
+      const d = (v as { toDate?: () => Date })?.toDate?.() ?? (v ? new Date(v as string) : null);
+      return d && !Number.isNaN(d.getTime()) ? getTodayBRT(d) : '';
+    };
+    return allActivities
+      .filter(a => actorId(a) === user?.uid)
+      .filter(a => a.type !== 'note' && a.type !== 'win')
+      .filter(a => {
+        const ref = (a as any).scheduledAt ?? (a as any).dueAt ?? (a as any).completedAt ?? (a as any).createdAt;
+        return diaDe(ref) === hoje;
+      })
+      .sort((x, y) => {
+        const t = (a: any) => a.scheduledAt?.toDate?.()?.getTime?.() ?? 0;
+        return t(x) - t(y);
+      });
+  }, [allActivities, user?.uid]);
+
   const filtered = filter === 'Todos'
     ? scopedActivities
     : scopedActivities.filter(a => a.type === ACT_FILTER_MAP[filter]);
@@ -77,16 +139,38 @@ export function ActivitiesPage() {
         <div>
           <h1 className="h1">Atividades</h1>
           <p className="muted" style={{ marginTop: 2, fontSize: 13 }}>
-            {isSdr
-              ? 'Suas atividades: cadência do dia, follow-ups de Standby e registros nos seus leads.'
-              : 'Histórico de todas as interações comerciais do time.'}
+            {tab === 'dia'
+              ? (isSdr
+                  ? 'A fila de hoje, na ordem dos blocos de horário definidos pela gestão.'
+                  : 'Sua fila de hoje. A fila de cada SDR aparece no painel dele.')
+              : (isSdr
+                  ? 'Suas atividades: cadência do dia, follow-ups de Standby e registros nos seus leads.'
+                  : 'Histórico de todas as interações comerciais do time.')}
           </p>
         </div>
         <span className="badge badge-gray" style={{ height: 28, padding: '0 12px', fontSize: 13 }}>
-          {filtered.length} registros
+          {tab === 'dia' ? `${minhasDeHoje.length} hoje` : `${filtered.length} registros`}
         </span>
       </div>
 
+      <div className="tabs">
+        <button className={`tab ${tab === 'dia' ? 'active' : ''}`} onClick={() => setTab('dia')}>
+          Meu Dia
+          {minhasDeHoje.filter(a => a.status !== 'completed').length > 0 && (
+            <span className="badge badge-primary" style={{ marginLeft: 6, fontSize: 10 }}>
+              {minhasDeHoje.filter(a => a.status !== 'completed').length}
+            </span>
+          )}
+        </button>
+        <button className={`tab ${tab === 'historico' ? 'active' : ''}`} onClick={() => setTab('historico')}>
+          Histórico
+        </button>
+      </div>
+
+      {tab === 'dia' ? (
+        <MeuDiaPanel activities={minhasDeHoje} blocks={blocks} readOnly={!isSdr} />
+      ) : (
+      <>
       <div className="chips">
         {ACT_FILTERS.map(f => (
           <button key={f} className={`chip ${filter === f ? 'on' : ''}`} onClick={() => setFilter(f)}>
@@ -152,6 +236,8 @@ export function ActivitiesPage() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

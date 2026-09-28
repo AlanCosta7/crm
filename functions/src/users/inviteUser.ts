@@ -22,7 +22,11 @@ const SMTP_SECRETS = ["SMTP_EMAIL", "SMTP_PASSWORD"];
 const LOGIN_URL = "https://wizmart-crm.web.app";
 
 const COLORS = ["#1A6B1A", "#8DB600", "#7C3AED", "#B45309", "#B91C1C", "#0E7490", "#4B5563"];
-const VALID_ROLES = ["master", "manager", "bdr", "sdr", "rep", "design", "viewer"];
+// "financeiro" — Fase 5.4 do PLANO_DESENHO_CRM.md: só valida contratos de
+// Comodato Smart Café (marca contractPaidAt). Sem role própria em DEFAULT_ROLES
+// da tela de Settings — o admin cria o Perfil "Financeiro" pela aba Perfis,
+// igual já faz para "design", e então este papel aparece pra convidar.
+const VALID_ROLES = ["master", "manager", "bdr", "sdr", "rep", "design", "viewer", "financeiro"];
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);

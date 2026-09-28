@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getDatabase, connectDatabaseEmulator } from 'firebase/database';
-import { getStorage } from 'firebase/storage';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // Configuração obtida das variáveis de ambiente (.env.local)
@@ -28,13 +28,30 @@ export const storage  = getStorage(app);
 export const functions = getFunctions(app, 'southamerica-east1');
 
 // Conecta aos Emuladores Locais se estiver em ambiente de Desenvolvimento
+//
+// As portas são parametrizáveis (VITE_EMU_*) para o E2E poder subir num segundo
+// conjunto de portas — o de `firebase.emutest.json` — sem colidir com o emulador
+// de desenvolvimento que alguém já tenha rodando na máquina. Os defaults são as
+// portas de `firebase.json`, então nada muda no fluxo normal de `npm run dev`.
 if (import.meta.env.DEV) {
-  console.log('[Firebase Config] Conectando aos emuladores do Firebase...');
+  const emuPort = (name: string, fallback: number): number => {
+    const raw = import.meta.env[`VITE_EMU_${name}_PORT` as keyof ImportMetaEnv];
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  const authPort      = emuPort('AUTH', 9099);
+  const firestorePort = emuPort('FIRESTORE', 8080);
+  const databasePort  = emuPort('DATABASE', 9000);
+  const functionsPort = emuPort('FUNCTIONS', 5001);
+  const storagePort   = emuPort('STORAGE', 9199);
+
+  console.log(`[Firebase Config] Conectando aos emuladores (auth:${authPort} firestore:${firestorePort})...`);
   try {
-    connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
-    connectFirestoreEmulator(db, 'localhost', 8080);
-    connectDatabaseEmulator(rtdb, 'localhost', 9000);
-    connectFunctionsEmulator(functions, 'localhost', 5001);
+    connectAuthEmulator(auth, `http://localhost:${authPort}`, { disableWarnings: true });
+    connectFirestoreEmulator(db, 'localhost', firestorePort);
+    connectDatabaseEmulator(rtdb, 'localhost', databasePort);
+    connectFunctionsEmulator(functions, 'localhost', functionsPort);
+    connectStorageEmulator(storage, 'localhost', storagePort);
   } catch (error) {
     console.warn('[Firebase Config] Emuladores já conectados ou offline:', error);
   }

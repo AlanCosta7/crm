@@ -21,6 +21,7 @@ export { onDealStageChanged } from "./deals/onDealStageChanged";
 
 // Assinaturas do card — participantIds/responsibleId (Plano de Assinaturas, Fase A)
 export { onDealParticipantsChanged } from "./deals/syncDealParticipants";
+export { onDealResponsibleChanged } from "./deals/reassignPendingActivities";
 
 // Rastreio de passagem de bastão (Plano de Assinaturas, Fase C)
 export { onDealTimelineEvents } from "./deals/dealTimelineEvents";
@@ -55,11 +56,29 @@ export { tvDataRefresher } from "./tv/tvDataRefresher";
 // Projetos de Layout — Sprint 4/6
 export { onProjectRequestCreated, onProjectRequestChanged } from "./projects/onProjectRequestChanged";
 
+// Notas ricas do card — espelho no feed e limpeza dos anexos
+export { onNoteWritten } from "./notes/onNoteWritten";
+export { onNoteDeleted } from "./notes/onNoteDeleted";
+export { janitorNoteAttachments } from "./notes/janitorNoteAttachments";
+
 // Comissões — fila de avaliação do dia 10 (Fase 5)
 export { commissionEvaluationQueue } from "./comissoes/commissionEvaluationQueue";
+// Lembrete de contratos de Comodato pendentes — dia 09, véspera da avaliação (Fase 5.4)
+export { contractReminderEmail } from "./comissoes/contractReminderEmail";
 
 // ── Usuários ──────────────────────────────────────────────────────────────────
 export { inviteUser } from "./users/inviteUser";
+// Claims fiéis ao documento: papel, produtos e bloqueio de acesso (PLANO_DESENHO_CRM.md Fase 0)
+export { onUserProfileWritten } from "./users/syncUserClaims";
+export { impersonateUser } from "./users/impersonateUser";
+export { endImpersonation } from "./users/endImpersonation";
+// SSO Rep App ↔ CRM completo (PLANO_PWA_REPRESENTANTES.md §3.3)
+export { mintHandoffToken } from "./users/mintHandoffToken";
+// Push real do Rep App — resumo da manhã (PLANO_PWA_REPRESENTANTES.md §8)
+export { sendRepDailyAgendaPush } from "./users/repDailyAgendaPush";
+// Auditoria de sessão — login/logoff e encerramento forçado (PLANO_DESENHO_CRM.md Fase 6.1)
+export { logSessionEvent } from "./users/logSessionEvent";
+export { endUserSession } from "./users/endUserSession";
 
 // ── Captação de Leads — WizMart Forms ─────────────────────────────────────────
 export { captureLead } from "./leads/captureLead";

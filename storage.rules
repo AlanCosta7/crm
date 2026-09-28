@@ -1,0 +1,203 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Firebase Storage — anexos das notas do card
+//
+// IMPORTANTE: rules de Storage NÃO conseguem consultar o Firestore. Toda a
+// autorização sai dos custom claims que o projeto já emite (`tenantId`, `role`)
+// somados ao `customMetadata` gravado no objeto no momento do upload.
+//
+// Layout: tenants/{tenantId}/notes/{noteId}/{attachmentId}/{fileName}
+// O `noteId` é gerado no client ANTES do upload, então o arquivo já nasce no
+// caminho definitivo — sem pasta temporária e sem mover objeto depois.
+// ─────────────────────────────────────────────────────────────────────────────
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isTenant(tid) {
+      return isAuth() && request.auth.token.tenantId == tid;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    // Papéis que podem anexar (viewer e design leem, mas não escrevem)
+    function isOperational(tid) {
+      return isTenant(tid) && role() != 'viewer' && role() != 'design';
+    }
+
+    function isMaster(tid) {
+      return isTenant(tid) && role() == 'master';
+    }
+
+    // Allowlist de tipos. SVG e HTML ficam de fora de propósito: o Storage os
+    // serve inline e viram vetor de XSS no domínio do bucket.
+    function isImage(t) {
+      return t.matches('image/(jpeg|png|webp|heic|heif|gif)');
+    }
+    function isVideo(t) {
+      return t.matches('video/(mp4|quicktime|webm)');
+    }
+    function isAudio(t) {
+      return t.matches('audio/(mp4|aac|mpeg|mp4a-latm|webm|ogg|wav|x-m4a)');
+    }
+    function isDocument(t) {
+      return t in [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/rtf',
+        'application/zip',
+        'text/csv',
+        'text/plain'
+      ];
+    }
+
+    // Limites por tipo — espelham a validação feita no client
+    function withinSizeLimit(t, size) {
+      return (isImage(t)    && size <=  15 * 1024 * 1024)
+          || (isAudio(t)    && size <=  25 * 1024 * 1024)
+          || (isDocument(t) && size <=  25 * 1024 * 1024)
+          || (isVideo(t)    && size <= 100 * 1024 * 1024);
+    }
+
+    // `.get(chave, default)` em vez de acesso direto: upload sem customMetadata
+    // chega aqui com `metadata` nulo e o acesso direto lança EvaluationException
+    // (nega do mesmo jeito, mas por exceção — e polui o log do emulador).
+    function ownerOf(md) {
+      return md == null ? '' : md.get('ownerUid', '');
+    }
+
+    function isAllowedUpload() {
+      return withinSizeLimit(request.resource.contentType, request.resource.size)
+             && ownerOf(request.resource.metadata) == request.auth.uid;
+    }
+
+    // ── Anexos de nota ───────────────────────────────────────────────────────
+    match /tenants/{tid}/notes/{noteId}/{attachmentId}/{fileName} {
+      // Leitura para qualquer membro do tenant — viewer e design inclusive
+      // (decisão do cliente, 31/08/2026)
+      allow read: if isTenant(tid);
+
+      // `resource == null` é OBRIGATÓRIO aqui, não decorativo: nas Storage
+      // Rules, escrever bytes num caminho que JÁ TEM objeto cai em `create`
+      // (não em `update`) a menos que a regra exija explicitamente que o
+      // recurso ainda não exista. Sem esta linha, reenviar para o MESMO
+      // `attachmentId` sobrescrevia o anexo por baixo de `allow create`, e o
+      // `allow update: if false` logo abaixo nunca era sequer avaliado (ver
+      // `tests/rules/notes.rules.test.ts`, describe "notas — objeto imutável").
+      allow create: if resource == null && isOperational(tid) && isAllowedUpload();
+
+      // Objeto é imutável: substituir um anexo significa criar outro attachmentId
+      allow update: if false;
+
+      // Autor apaga o que subiu; master modera qualquer anexo
+      allow delete: if isTenant(tid)
+                    && (ownerOf(resource.metadata) == request.auth.uid || isMaster(tid));
+    }
+
+    // ── Contrato de Comodato Smart Café (Fase 5.4) ──────────────────────────────
+    // Layout: tenants/{tid}/deals/{dealId}/contract/{attachmentId}/{fileName}
+    // Um `attachmentId` novo a cada envio (ver contractAttachment.ts no front)
+    // garante que "Substituir PDF" é sempre um `create` num caminho novo —
+    // nunca um `update` do objeto anterior, que fica imutável (mesma política
+    // de notas: quem quer "editar" sobe de novo, não sobrescreve).
+    match /tenants/{tid}/deals/{dealId}/contract/{attachmentId}/{fileName} {
+      // Leitura para qualquer membro do tenant — inclui `financeiro`, que
+      // precisa abrir o PDF antes de confirmar o pagamento (o papel financeiro
+      // não existe nas claims deste arquivo por nome — Storage rules não leem
+      // Firestore para validar RBAC fino, então a leitura fica no mesmo nível
+      // amplo já usado para notas).
+      allow read: if isTenant(tid);
+
+      // Só PDF — é um contrato assinado para conferência, não anexo genérico.
+      // `financeiro` fica de fora do escrito de propósito: o papel só marca
+      // `contractPaidAt` no Firestore (ver firestore.rules) — nunca sobe nem
+      // substitui o arquivo. `isOperational` sozinho não bastaria aqui: ele só
+      // exclui viewer/design, e financeiro não é nenhum dos dois.
+      //
+      // `resource == null` é OBRIGATÓRIO aqui, não decorativo: nas Storage
+      // Rules, escrever bytes num caminho que JÁ TEM objeto cai em `create`
+      // (não em `update`) a menos que a regra exija explicitamente que o
+      // recurso ainda não exista. Um teste (`tests/rules/contrato-storage
+      // .rules.test.ts`) provou isso na prática — sem esta linha, reenviar
+      // para o MESMO `attachmentId` sobrescrevia o PDF por baixo de
+      // `allow create`, e o `allow update: if false` logo abaixo nunca era
+      // sequer avaliado.
+      allow create: if resource == null
+                    && isOperational(tid) && role() != 'financeiro'
+                    && request.resource.contentType == 'application/pdf'
+                    && request.resource.size <= 15 * 1024 * 1024
+                    && ownerOf(request.resource.metadata) == request.auth.uid;
+
+      // Nunca é alcançado por um `uploadBytes()` normal (que cai em `create`
+      // acima) — cobre só uma chamada explícita de `updateMetadata()`.
+      allow update: if false;
+      allow delete: if isMaster(tid);
+    }
+
+    // ── Solicitação de Projeto de layout (PLANO_DESENHO_CRM_2.md, A3/A4) ──────────
+    // Layout: tenants/{tid}/project_requests/{requestId}/{request|delivery}/{attId}/{arquivo}
+    //
+    //  request/  — fotos e vídeos do local, enviados por quem SOLICITA. Mesmo
+    //              gate da criação em `project_requests` (isOperational: bdr,
+    //              sdr, rep, manager, master; nunca viewer/design/financeiro).
+    //  delivery/ — o projeto pronto, enviado pelo DESIGN (ou gestão). O papel
+    //              `design` NÃO é operacional, por isso tem regra própria aqui.
+    //
+    // `resource == null` em ambas, pelo mesmo motivo do contrato e das notas:
+    // sem ele, reenviar bytes para um caminho existente cai em `create` e
+    // sobrescreve o arquivo por baixo do `allow update: if false`.
+    function isDesignOrManager(tid) {
+      return isTenant(tid) && (role() == 'design' || role() == 'manager' || role() == 'master');
+    }
+
+    match /tenants/{tid}/project_requests/{requestId}/request/{attachmentId}/{fileName} {
+      allow read: if isTenant(tid);
+      allow create: if resource == null
+                    && isOperational(tid) && role() != 'financeiro'
+                    && ownerOf(request.resource.metadata) == request.auth.uid
+                    && ((isImage(request.resource.contentType) && request.resource.size <= 15 * 1024 * 1024)
+                        || (isVideo(request.resource.contentType) && request.resource.size <= 100 * 1024 * 1024));
+      allow update: if false;
+      allow delete: if isMaster(tid);
+    }
+
+    match /tenants/{tid}/project_requests/{requestId}/delivery/{attachmentId}/{fileName} {
+      allow read: if isTenant(tid);
+      allow create: if resource == null
+                    && isDesignOrManager(tid)
+                    && ownerOf(request.resource.metadata) == request.auth.uid
+                    && ((isImage(request.resource.contentType) && request.resource.size <= 15 * 1024 * 1024)
+                        || (request.resource.contentType == 'application/pdf' && request.resource.size <= 25 * 1024 * 1024)
+                        || (isVideo(request.resource.contentType) && request.resource.size <= 100 * 1024 * 1024));
+      allow update: if false;
+      allow delete: if isMaster(tid);
+    }
+
+    // ── CMS da Landing Page B2B (wizmart-lp-b2b) ─────────────────────────────
+    // Fotos/vídeos trocados pelo Admin Master no painel /admin. Path fixo
+    // (sem tenant): é asset do site público, servido de volta publicamente.
+    match /lp-content/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.token.role == 'master'
+                   && withinSizeLimit(request.resource.contentType, request.resource.size)
+                   && (isImage(request.resource.contentType) || isVideo(request.resource.contentType));
+    }
+
+    // Nada mais é gravável no bucket
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
