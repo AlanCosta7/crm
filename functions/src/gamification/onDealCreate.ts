@@ -1,10 +1,13 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { effectiveActionPoints } from "../shared/gamificationSettings";
 
 /**
  * Cloud Function que ouve a criação de negócios no Firestore
  * e inicializa suas tarefas gamificadas, concede pontos e atualiza a empresa associada.
+ * Pontos de criação configuráveis pelo master (PLANO_DESENHO_CRM_2.md); 5 pts
+ * é só o padrão, mesmo valor fixo de antes dessa mudança.
  */
 export const onDealCreate = onDocumentCreated(
   { document: "tenants/{tenantId}/deals/{dealId}", region: "southamerica-east1" },
@@ -34,11 +37,19 @@ export const onDealCreate = onDocumentCreated(
       console.log(`[onDealCreate] Tarefas gamificadas inicializadas com sucesso para o negócio ${dealId}`);
     }
 
-    // 2. Pontuação de criação (+5 pontos para o criador do negócio)
+    // 2. Pontuação de criação, valor configurável pelo master (padrão 5 pts)
     const ownerId = dealData.owner;
     if (ownerId) {
       const userRef = db.doc(`tenants/${tenantId}/users/${ownerId}`);
       const gamifRef = db.doc(`tenants/${tenantId}/gamification/${ownerId}`);
+
+      let creationPts = effectiveActionPoints(undefined).dealCreated;
+      try {
+        const settingsSnap = await db.doc(`tenants/${tenantId}/settings/gamification`).get();
+        creationPts = effectiveActionPoints(settingsSnap.exists ? settingsSnap.data() : undefined).dealCreated;
+      } catch (err) {
+        console.error("[onDealCreate] Erro ao ler pontuação configurada, usando padrão:", err);
+      }
 
       try {
         await db.runTransaction(async (transaction) => {
@@ -46,8 +57,8 @@ export const onDealCreate = onDocumentCreated(
           if (userSnap.exists) {
             const userData = userSnap.data() || {};
             const currentPoints = userData.points || 0;
-            const newPoints = currentPoints + 5;
-            
+            const newPoints = currentPoints + creationPts;
+
             // Incrementa na coleção de usuários
             transaction.update(userRef, {
               points: newPoints,
@@ -60,7 +71,7 @@ export const onDealCreate = onDocumentCreated(
               lastActivity: FieldValue.serverTimestamp(),
             }, { merge: true });
 
-            console.log(`[onDealCreate] +5 pontos concedidos ao usuário ${ownerId} por criar o negócio.`);
+            console.log(`[onDealCreate] +${creationPts} pontos concedidos ao usuário ${ownerId} por criar o negócio.`);
           } else {
             console.log(`[onDealCreate] Usuário ${ownerId} não foi encontrado no tenant ${tenantId}`);
           }

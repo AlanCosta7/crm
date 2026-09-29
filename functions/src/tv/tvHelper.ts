@@ -1,6 +1,7 @@
 import * as admin from "firebase-admin";
 import { computeOrigin } from "../deals/dealOrigin";
 import { buildSdrRanking, firstName, periodStartsBRT, type SdrActivity, type SdrEvent, type SdrRanking } from "./rankingSdr";
+import { effectiveSdrRankingWeights } from "../shared/gamificationSettings";
 
 /**
  * Consolida dados em tempo real para um canal de TV específico e atualiza no RTDB `/public_tv/{token}`.
@@ -201,12 +202,25 @@ export async function refreshTvSnapshot(tenantId: string, linkId: string, linkDa
           activities.push({ userId: a.userId, type: a.type, status: a.status, createdAt, productId: a.productId });
         }
       }
+      // Pesos do pódio (PLANO_DESENHO_CRM_2.md — pontuação configurável): mesmo
+      // documento de `settings/gamification` de onTaskComplete/onDealWon/
+      // onDealStageChanged. Ausente = padrão, que reproduz visitas > reuniões
+      // realizadas > % de atividades (D5, já confirmado com o cliente).
+      let weights = effectiveSdrRankingWeights(undefined);
+      try {
+        const settingsSnap = await db.doc(`tenants/${tenantId}/settings/gamification`).get();
+        weights = effectiveSdrRankingWeights(settingsSnap.exists ? settingsSnap.data() : undefined);
+      } catch (err) {
+        console.error("[tvHelper] Erro ao ler pesos do ranking de SDRs, usando padrão:", err);
+      }
+
       rankingSdr = buildSdrRanking({
         users: usersSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any),
         events,
         activities,
         productId,
         now,
+        weights,
       });
     } catch (err) {
       console.error("[tvHelper] Erro ao montar o ranking de SDRs:", err);

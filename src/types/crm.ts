@@ -78,6 +78,10 @@ export interface FunnelStage {
   isConvergencePoint: boolean;
   isHandoffRequired: boolean;
   coinsOnEnter: number;
+  /** Pontos do Ranking Geral de Pontos ao entrar neste estágio — irmão de
+   *  `coinsOnEnter`, mesma tela de Configurações. Ausente/0 = não pontua
+   *  (PLANO_DESENHO_CRM_2.md — pontuação configurável). */
+  pointsOnEnter?: number;
   slaBusinessDays: number;
   defaultTemplateIds: string[];
   /** Smart Café: indica que este estágio requer seleção de subtipo de conexão */
@@ -785,6 +789,34 @@ export interface TvLink {
   allowedMetrics?: string[];
   /** Período inicial do Ranking de SDRs; quem está na TV pode alternar. */
   rankingPeriod?: 'day' | 'week' | 'month';
+}
+
+/**
+ * `tenants/{tid}/settings/gamification` — pontuação configurável pelo master
+ * (PLANO_DESENHO_CRM_2.md). Ações que não são etapa de funil (etapa usa
+ * `FunnelStage.pointsOnEnter`, ao lado de `coinsOnEnter`) e os pesos do pódio
+ * de SDRs na TV. Documento pode não existir, ou vir parcial — ver
+ * `utils/gamificationSettings.ts` para os padrões.
+ */
+export interface GamificationSettings {
+  actionPoints?: Partial<{
+    /** Negócio criado — hoje concedido por `onDealCreate.ts` a quem criou o card. */
+    dealCreated: number;
+    emailSent: number;
+    whatsappSent: number;
+    /** A tarefa "Agendar reunião" do checklist do card — diferente da etapa
+     *  Reunião Agendada do funil, que pontua via `pointsOnEnter`. */
+    meetingTaskDone: number;
+    dealWon: number;
+  }>;
+  /** Pesos da fórmula que ordena o pódio da TV — visitas continua o critério
+   *  dominante nos padrões (D5, confirmado com o cliente); o master pode
+   *  reequilibrar. `score = visits*peso.visits + meetingsDone*peso.meetingsDone + actPct*peso.actPct`. */
+  sdrRankingWeights?: Partial<{
+    visits: number;
+    meetingsDone: number;
+    actPct: number;
+  }>;
 }
 
 // ─── Settings / Admin ─────────────────────────────────────────────────────────

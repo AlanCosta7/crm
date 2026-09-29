@@ -15,6 +15,7 @@
  *
  * Puro, sem I/O: o `tvHelper` busca os dados e chama aqui.
  */
+import { DEFAULT_SDR_RANKING_WEIGHTS } from "../shared/gamificationSettings";
 
 export type RankingPeriod = "day" | "week" | "month";
 export const RANKING_PERIODS: RankingPeriod[] = ["day", "week", "month"];
@@ -98,14 +99,25 @@ function initialsOf(user: SdrUser): string {
 const inProduct = (productId: string, itemProduct?: string) =>
   productId === "all" || !itemProduct || itemProduct === productId;
 
+export interface SdrRankingWeights {
+  visits: number;
+  meetingsDone: number;
+  actPct: number;
+}
+
 export function buildSdrRanking(input: {
   users: SdrUser[];
   events: SdrEvent[];
   activities: SdrActivity[];
   productId: string;
   now: Date;
+  /** Pesos da fórmula de pontuação do pódio (PLANO_DESENHO_CRM_2.md —
+   *  pontuação configurável). Em produção, o chamador (`tvHelper`) resolve o
+   *  documento configurado via `effectiveSdrRankingWeights` antes de chamar —
+   *  este módulo é puro, sem I/O. Omitido, cai no mesmo padrão. */
+  weights?: SdrRankingWeights;
 }): SdrRanking {
-  const { users, events, activities, productId, now } = input;
+  const { users, events, activities, productId, now, weights = DEFAULT_SDR_RANKING_WEIGHTS } = input;
   const starts = periodStartsBRT(now);
 
   const sdrs = users.filter(
@@ -147,16 +159,14 @@ export function buildSdrRanking(input: {
       };
     });
 
-    // Peso do pódio = visitas agendadas. Empate: reuniões realizadas, depois % de
-    // atividades, depois ordem alfabética (para a posição não "pular" entre
-    // atualizações da TV quando tudo empata).
-    rows.sort(
-      (a, b) =>
-        b.visits - a.visits ||
-        b.meetingsDone - a.meetingsDone ||
-        b.actPct - a.actPct ||
-        a.name.localeCompare(b.name, "pt-BR"),
-    );
+    // Pontuação do pódio: soma ponderada (PLANO_DESENHO_CRM_2.md — pontuação
+    // configurável). Com os pesos padrão (visits >> meetingsDone >> actPct),
+    // isso reproduz a ordem original — visitas agendadas decide, reuniões
+    // realizadas desempata, % de atividades desempata o desempate. O master
+    // pode reequilibrar os pesos; ordem alfabética é sempre o último critério,
+    // pra posição não "pular" entre atualizações da TV quando tudo empata.
+    const score = (r: RankingRow) => r.visits * weights.visits + r.meetingsDone * weights.meetingsDone + r.actPct * weights.actPct;
+    rows.sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name, "pt-BR"));
     result[period] = rows;
   }
 

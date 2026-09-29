@@ -2,11 +2,14 @@ import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { ServerValue } from "firebase-admin/database";
+import { effectiveActionPoints } from "../shared/gamificationSettings";
 
 /**
  * Cloud Function que reage a alteração de negócios e identifica quando foi GANHO.
  * Estágios de ganho: 'inaugurado' (WizMart) e 'instalacao_realizada' (Smart Café).
- * Concede +100 pts de bônus comercial, registra atividade de vitória e atualiza KPIs no RTDB.
+ * Concede o bônus configurável de `dealWon` (PLANO_DESENHO_CRM_2.md — pontuação
+ * configurável; 100 pts por padrão, mesmo valor fixo de antes), registra
+ * atividade de vitória e atualiza KPIs no RTDB.
  */
 const WON_STAGES = ['inaugurado', 'instalacao_realizada'];
 
@@ -25,9 +28,17 @@ export const onDealWon = onDocumentUpdated(
       if (!ownerId) return;
       const productId = afterData.productId || "wizmart";
 
-      console.log(`[onDealWon] Negócio ${dealId} foi GANHO! Concedendo +100 pts para o owner ${ownerId}`);
-
       const db = admin.firestore();
+
+      let bonusPts = effectiveActionPoints(undefined).dealWon;
+      try {
+        const settingsSnap = await db.doc(`tenants/${tenantId}/settings/gamification`).get();
+        bonusPts = effectiveActionPoints(settingsSnap.exists ? settingsSnap.data() : undefined).dealWon;
+      } catch (err) {
+        console.error("[onDealWon] Erro ao ler pontuação configurada, usando padrão:", err);
+      }
+
+      console.log(`[onDealWon] Negócio ${dealId} foi GANHO! Concedendo +${bonusPts} pts para o owner ${ownerId}`);
       const rtdb = admin.database();
 
       const userRef = db.doc(`tenants/${tenantId}/users/${ownerId}`);
@@ -36,14 +47,14 @@ export const onDealWon = onDocumentUpdated(
       let newPoints = 0;
       let streakCount = 1;
 
-      // 1. Transação para conceder +100 pts de bônus no Firestore
+      // 1. Transação para conceder o bônus de pts no Firestore
       try {
         await db.runTransaction(async (transaction) => {
           const userSnap = await transaction.get(userRef);
           if (userSnap.exists) {
             const userData = userSnap.data() || {};
             const currentPoints = userData.points || 0;
-            newPoints = currentPoints + 100;
+            newPoints = currentPoints + bonusPts;
             streakCount = userData.streak || 1;
 
             transaction.update(userRef, {

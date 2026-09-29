@@ -23,6 +23,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { AGENDA_TRIGGER_STAGES } from "../cadence/agendaRuler";
 import { applyAgendaRuler, cancelAgendaRuler } from "../cadence/applyAgendaRuler";
 import { recordSdrEvent } from "../tv/sdrEvents";
+import { awardPoints } from "../gamification/awardPoints";
 
 function nowMonth(): string {
   const d = new Date();
@@ -82,6 +83,20 @@ export const onDealStageChanged = onDocumentUpdated(
         });
       } catch (err) {
         console.error("[onDealStageChanged] Erro ao premiar moedas:", err);
+      }
+    }
+
+    // ── Premiação de pontos por estágio (PLANO_DESENHO_CRM_2.md — pontuação
+    // configurável) ────────────────────────────────────────────────────────
+    // Irmão de coinsOnEnter: mesmo estágio, mesma tela de Configurações, moeda
+    // diferente (pts do Ranking Geral de Pontos, não moedas da Loja). Ausente/0
+    // = não pontua — todo estágio existente começa assim até o master mexer.
+    const pointsOnEnter: number = targetStage?.pointsOnEnter || 0;
+    if (pointsOnEnter > 0 && ownerId) {
+      try {
+        await awardPoints(db, admin.database(), tenantId, ownerId, pointsOnEnter);
+      } catch (err) {
+        console.error("[onDealStageChanged] Erro ao premiar pontos:", err);
       }
     }
 

@@ -2,10 +2,14 @@ import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { ServerValue } from "firebase-admin/database";
+import { effectiveActionPoints } from "../shared/gamificationSettings";
 
 /**
- * Cloud Function que ouve a conclusão de tarefas no Firestore (+15, +20 ou +30 pts)
- * e atualiza pontuações, registra atividades no feed e atualiza o RTDB Leaderboard.
+ * Cloud Function que ouve a conclusão de tarefas no Firestore e atualiza
+ * pontuações, registra atividades no feed e atualiza o RTDB Leaderboard.
+ * Valores configuráveis pelo master em Configurações (PLANO_DESENHO_CRM_2.md
+ * — pontuação configurável); 15/20/30 pts são só o padrão, mesmos valores
+ * fixos de antes dessa mudança.
  */
 export const onTaskComplete = onDocumentUpdated(
   { document: "tenants/{tenantId}/deals/{dealId}", region: "southamerica-east1" },
@@ -23,11 +27,22 @@ export const onTaskComplete = onDocumentUpdated(
     if (!ownerId) return;
     const productId = afterData.productId || "wizmart";
 
-    // Valores de pontos configurados (Fase 1 / 4)
+    const db = admin.firestore();
+    const rtdb = admin.database();
+
+    // Valores de pontos: configuráveis pelo master, padrão 15/20/30 se o
+    // documento não existir ou não tiver essas chaves.
+    let actionPoints = effectiveActionPoints(undefined);
+    try {
+      const settingsSnap = await db.doc(`tenants/${tenantId}/settings/gamification`).get();
+      actionPoints = effectiveActionPoints(settingsSnap.exists ? settingsSnap.data() : undefined);
+    } catch (err) {
+      console.error("[onTaskComplete] Erro ao ler pontuação configurada, usando padrão:", err);
+    }
     const pointsMap: Record<string, number> = {
-      e: 15, // Email
-      w: 20, // WhatsApp
-      m: 30, // Reunião (Meeting)
+      e: actionPoints.emailSent,
+      w: actionPoints.whatsappSent,
+      m: actionPoints.meetingTaskDone,
     };
 
     const taskLabels: Record<string, string> = {
@@ -35,9 +50,6 @@ export const onTaskComplete = onDocumentUpdated(
       w: "Mensagem WhatsApp",
       m: "Agendar reunião",
     };
-
-    const db = admin.firestore();
-    const rtdb = admin.database();
 
     // Compara as tarefas e identifica qual foi concluída (passou de false para true)
     for (const key of ['e', 'w', 'm']) {

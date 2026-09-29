@@ -19,6 +19,7 @@ import { sortedStages } from '../../utils/funnelUtils';
 import { CalendarPane } from './CalendarPane';
 import { LeadSourcesPane } from './LeadSourcesPane';
 import { AuditoriaPane } from './AuditoriaPane';
+import { GamificacaoPane } from './GamificacaoPane';
 import { dealsToReassign } from './reassignCarteira';
 import { PERMISSIONS_REV, defaultPermissions, effectivePermissions } from '../../utils/rolePermissions';
 
@@ -398,7 +399,7 @@ const getRoleBadgeClass = (roleId: string) => {
 };
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'empresa' | 'usuarios' | 'perfis' | 'pipelines' | 'calendar' | 'captacao' | 'integracoes' | 'auditoria'>('usuarios');
+  const [tab, setTab] = useState<'empresa' | 'usuarios' | 'perfis' | 'pipelines' | 'gamificacao' | 'calendar' | 'captacao' | 'integracoes' | 'auditoria'>('usuarios');
 
   // Firestore sync bindings
   const { data: users, loading: loadingUsers } = useFirestoreCollection<SettingUser>('users');
@@ -1089,6 +1090,7 @@ export function SettingsPage() {
     usuarios:    renderUsuarios,
     perfis:      renderPerfis,
     pipelines:   renderPipelines,
+    gamificacao: () => <GamificacaoPane />,
     calendar:    renderCalendar,
     captacao:    () => <LeadSourcesPane />,
     integracoes: renderIntegracoes,
@@ -1115,6 +1117,7 @@ export function SettingsPage() {
           ['usuarios',    'Equipe & Usuários'],
           ['perfis',      '🏆 Perfis & Permissões'],
           ['pipelines',   'Pipelines'],
+          ['gamificacao', '🏆 Pontuação'],
           ['calendar',    '📅 Google Calendar'],
           ['captacao',    '📥 Captação de Leads'],
           ['integracoes', 'Integrações'],

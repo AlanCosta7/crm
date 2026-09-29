@@ -158,4 +158,22 @@ describe("buildSdrRanking", () => {
     });
     expect(r.day[0]).toMatchObject({ visits: 0, meetingsDone: 0, meetingsScheduled: 0, actTotal: 0, actPct: 0 });
   });
+
+  it("pesos configuráveis (PLANO_DESENHO_CRM_2.md): master pode dar mais peso a reuniões que a visitas", () => {
+    const events = [
+      ev("a", "visit_scheduled", "2026-09-25T12:00:00Z"), // Ana: 1 visita
+      ev("b", "meeting_done", "2026-09-25T12:00:00Z"),
+      ev("b", "meeting_done", "2026-09-25T13:00:00Z"), // Bia: 2 reuniões realizadas, 0 visitas
+    ];
+    const withDefault = buildSdrRanking({
+      users: [sdr("a", "Ana"), sdr("b", "Bia")], events, activities: [], productId: "all", now: NOW,
+    });
+    expect(withDefault.day.map((x) => x.name)).toEqual(["Ana", "Bia"]); // padrão: visitas manda
+
+    const withReuniaoPesada = buildSdrRanking({
+      users: [sdr("a", "Ana"), sdr("b", "Bia")], events, activities: [], productId: "all", now: NOW,
+      weights: { visits: 1, meetingsDone: 10, actPct: 0 },
+    });
+    expect(withReuniaoPesada.day.map((x) => x.name)).toEqual(["Bia", "Ana"]); // reconfigurado: reunião manda
+  });
 });
