@@ -70,9 +70,12 @@ export function TVPage() {
       console.error("[TVPage] Erro ao assinar canal de TV no RTDB:", error);
       setTvData(null);
       // A regra do RTDB nega a leitura de um link vencido (PLANO_DESENHO_CRM_2.md,
-      // B6) — chega aqui como PERMISSION_DENIED, não como snapshot vazio.
+      // B6) — chega aqui como PERMISSION_DENIED, não como snapshot vazio. O SDK
+      // tipa o erro como `Error` puro, mas em tempo de execução é um FirebaseError
+      // com `.code`.
+      const code = (error as { code?: string })?.code;
       setError(
-        error?.code === 'PERMISSION_DENIED'
+        code === 'PERMISSION_DENIED'
           ? 'Canal de TV não encontrado ou expirado.'
           : 'Não foi possível conectar ao canal de TV.',
       );
