@@ -16,7 +16,7 @@
     },
     "public_tv": {
       "$token": {
-        ".read": true,
+        ".read": "!data.child('expiresAtMs').exists() || now < data.child('expiresAtMs').val()",
         ".write": false
       }
     }

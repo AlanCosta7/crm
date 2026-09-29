@@ -460,11 +460,13 @@ export function KPIsPage() {
     const token = 'tv_' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
     const now = new Date();
     let expires = 'Nunca expira';
+    let expiresAtMs: number | null = null;
     if (duration !== 'Nunca expira') {
       const days = parseInt(duration);
       const expDate = new Date();
       expDate.setDate(now.getDate() + days);
       expires = expDate.toLocaleDateString('pt-BR');
+      expiresAtMs = expDate.getTime();
     }
 
     const newLink: any = {
@@ -472,6 +474,7 @@ export function KPIsPage() {
       deviceName,
       created: now.toLocaleDateString('pt-BR'),
       expires,
+      expiresAtMs,
       active: true,
       allowedMetrics,
       productId,

@@ -270,6 +270,12 @@ export async function refreshTvSnapshot(tenantId: string, linkId: string, linkDa
     tenantId,
     tenantName: linkData.deviceName || "WizMart Display",
     expiresAt: linkData.expires,
+    // Validade em epoch ms — é o que a regra do RTDB compara contra `now` pra
+    // recusar leitura de um link vencido (PLANO_DESENHO_CRM_2.md, B6). Link
+    // gerado antes desta mudança não tem o campo: continua sem expiração
+    // aplicada, igual já era (não dá pra impor retroativamente uma validade
+    // que nunca foi gravada).
+    expiresAtMs: linkData.expiresAtMs ?? null,
     allowedMetrics: allowed,
     productId,
     live_kpis: liveKpis,

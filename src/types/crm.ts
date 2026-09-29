@@ -777,6 +777,9 @@ export interface TvLink {
   productId?: ProductScope;
   created: string;
   expires: string;
+  /** Validade em epoch ms, para o servidor comparar — `null`/ausente = nunca expira.
+   *  `expires` continua só o texto exibido na tela (PLANO_DESENHO_CRM_2.md, B6). */
+  expiresAtMs?: number | null;
   active: boolean;
   /** Métricas que o canal pode exibir — o gate real acontece no servidor (`tvHelper`). */
   allowedMetrics?: string[];

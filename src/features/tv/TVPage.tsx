@@ -69,7 +69,13 @@ export function TVPage() {
     onValue(tvRef, handleValue, (error) => {
       console.error("[TVPage] Erro ao assinar canal de TV no RTDB:", error);
       setTvData(null);
-      setError('Não foi possível conectar ao canal de TV.');
+      // A regra do RTDB nega a leitura de um link vencido (PLANO_DESENHO_CRM_2.md,
+      // B6) — chega aqui como PERMISSION_DENIED, não como snapshot vazio.
+      setError(
+        error?.code === 'PERMISSION_DENIED'
+          ? 'Canal de TV não encontrado ou expirado.'
+          : 'Não foi possível conectar ao canal de TV.',
+      );
       setLoading(false);
     });
 
