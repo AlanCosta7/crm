@@ -22,6 +22,11 @@
         "wizmart-crm-app": [
           "crm-codifyx"
         ]
+      },
+      "database": {
+        "main": [
+          "codifyx7-default-rtdb"
+        ]
       }
     }
   },

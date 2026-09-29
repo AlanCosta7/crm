@@ -20,7 +20,7 @@
     }
   ],
   "database": {
-    "instance": "wizmart-crm-default-rtdb",
+    "target": "main",
     "rules": "database.rules.json"
   },
   "storage": {
