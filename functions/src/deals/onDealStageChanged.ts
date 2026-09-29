@@ -22,6 +22,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { AGENDA_TRIGGER_STAGES } from "../cadence/agendaRuler";
 import { applyAgendaRuler, cancelAgendaRuler } from "../cadence/applyAgendaRuler";
+import { recordSdrEvent } from "../tv/sdrEvents";
 
 function nowMonth(): string {
   const d = new Date();
@@ -117,6 +118,20 @@ export const onDealStageChanged = onDocumentUpdated(
       } catch (err) {
         console.error("[onDealStageChanged] Erro ao gravar cohortKeys:", err);
       }
+    }
+
+    // ── Eventos do SDR para o Ranking da TV (PLANO_DESENHO_CRM_2.md) ─────────
+    // Um evento por passagem de etapa (reunião agendada/realizada, visita
+    // agendada). Antes do bloco de RTDB abaixo, pelo mesmo motivo da régua.
+    try {
+      await recordSdrEvent(db, tenantId, {
+        id: dealId,
+        stage: newStage,
+        assignedSdrId: after.assignedSdrId,
+        productId,
+      });
+    } catch (err) {
+      console.error("[onDealStageChanged] Erro ao gravar evento do SDR:", err);
     }
 
     // ── Régua de agenda (Fase 3 — slide 8) ───────────────────────────────────
